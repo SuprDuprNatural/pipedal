@@ -118,23 +118,27 @@ const SuprVuView =
 
             modifyControls(host: ICustomizationHost,
                 controls: (React.ReactNode | ControlGroup)[]): (React.ReactNode | ControlGroup)[] {
-                const meter = (
-                    <SuprMeterControl key="supr_vu_meter"
+                // a classic stereo pair: one VU face per channel
+                const meterL = (
+                    <SuprMeterControl key="supr_vu_meter_l"
                         instanceId={this.props.instanceId}
-                        needles={[
-                            { port: "vu_l", color: "#b03030" },
-                            { port: "vu_r", color: "#3060b0" },
-                        ]}
-                        leds={[
-                            { port: "peak_l", thresholdDb: -1, color: "#e33" },
-                            { port: "peak_r", thresholdDb: -1, color: "#e33" },
-                        ]}
+                        needles={[{ port: "vu_l", color: "#b03030" }]}
+                        leds={[{ port: "peak_l", thresholdDb: -1, color: "#e33" }]}
                         ticks={VU_TICKS}
                         minDb={-20} maxDb={3} gamma={2.0}
-                        label="VU"
-                        width={360} height={160} tallControl={true} />);
-                // the meter replaces the generic output controls
-                return [meter];
+                        label="LEFT"
+                        width={300} height={140} tallControl={true} />);
+                const meterR = (
+                    <SuprMeterControl key="supr_vu_meter_r"
+                        instanceId={this.props.instanceId}
+                        needles={[{ port: "vu_r", color: "#b03030" }]}
+                        leds={[{ port: "peak_r", thresholdDb: -1, color: "#e33" }]}
+                        ticks={VU_TICKS}
+                        minDb={-20} maxDb={3} gamma={2.0}
+                        label="RIGHT"
+                        width={300} height={140} tallControl={true} />);
+                // the meters replace the generic output controls
+                return [meterL, meterR];
             }
 
             render() {
