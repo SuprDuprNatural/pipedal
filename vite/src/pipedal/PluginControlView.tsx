@@ -876,8 +876,15 @@ const PluginControlView =
                                 </div>
                             );
                         } else {
+                            // controls marked tallControl (e.g. large meters)
+                            // size themselves instead of using the standard
+                            // 116px control slot
+                            const tall = React.isValidElement(node)
+                                && (node.props as any)?.tallControl === true;
                             result.push((
-                                <div key={"ctl" + (this.controlKeyIndex++)} className={hasGroups ? classes.portgroupControlPadding : classes.controlPadding} >
+                                <div key={"ctl" + (this.controlKeyIndex++)}
+                                    className={hasGroups ? classes.portgroupControlPadding : classes.controlPadding}
+                                    style={tall ? { height: "auto" } : undefined} >
                                     {node as ReactNode}
                                 </div>
                             ));

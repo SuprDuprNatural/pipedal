@@ -36,9 +36,12 @@ import ToobPlayerFactory from './ToobPlayerView';
 import ToobNamViewFactory from './ToobNamView';
 import ToobParametericEqViewFactory from './ToobParametricEqView';
 import {ToobParametricEqViewFactoryStereo} from './ToobParametricEqView';
+import { SuprCompressorViewFactory, SuprVuViewFactory } from './SuprPedalViews';
 
 
 let pluginFactories: IControlViewFactory[] = [
+    new SuprCompressorViewFactory(),
+    new SuprVuViewFactory(),
     new GxTunerViewFactory(),
     new ToobPowerstage2ViewFactory(),
     new ToobWarmerViewFactory(),
