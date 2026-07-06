@@ -137,8 +137,10 @@ const SuprVuView =
                         minDb={-20} maxDb={3} gamma={2.0}
                         label="RIGHT"
                         width={300} height={140} tallControl={true} />);
-                // the meters replace the generic output controls
-                return [meterL, meterR];
+                // The four dB output readouts are pprops:notOnGUI, so `controls`
+                // holds only the visible input controls (the Calibration knob);
+                // show the meters, then that knob below them.
+                return [meterL, meterR, ...controls];
             }
 
             render() {
