@@ -47,7 +47,8 @@ import Fade from '@mui/material/Fade';
 import Divider from '@mui/material/Divider';
 import ResizeResponsiveComponent from './ResizeResponsiveComponent';
 import PluginInfoDialog from './PluginInfoDialog';
-import { GetControlView, HasCustomControlView } from './ControlViewFactory';
+import { GetControlView } from './ControlViewFactory';
+import { FitContentContext } from './PluginControlView';
 import MidiBindingsDialog from './MidiBindingsDialog';
 import PluginPresetSelector from './PluginPresetSelector';
 import OldDeleteIcon from "./svg/old_delete_outline_24dp.svg?react";
@@ -238,25 +239,11 @@ export const MainPage =
                     }
                     let missing = !item.isSplit() && !item.isEmpty() && !uiPlugin;
                     let selected = item.instanceId === this.state.selectedPedal;
-                    // Estimate a control-area height that shows every control
-                    // row without an inner scroll; the generic control view
-                    // wraps ~100px-wide controls into ~144px-tall rows.
-                    let controlHeight = 190;
-                    if (missing || item.isEmpty()) {
-                        controlHeight = 110;
-                    } else if (!item.isSplit() && HasCustomControlView(item.uri)) {
-                        controlHeight = this.windowSize.width < 500 ? 380 : 300;
-                    } else if (uiPlugin) {
-                        // dropdown (enum) controls render about twice as wide
-                        // as a dial
-                        let units = 0;
-                        for (let c of uiPlugin.controls) {
-                            units += (c.enumeration_property || c.scale_points.length > 2) ? 2 : 1;
-                        }
-                        let capacity = Math.max(2, Math.floor((this.windowSize.width - 60) / 100));
-                        let rows = Math.max(1, Math.ceil(units / capacity));
-                        controlHeight = rows * 144 + 46;
-                    }
+                    // Plugin control views size to their content via
+                    // FitContentContext; splits and missing plugins get a
+                    // definite height.
+                    let fitContent = !item.isSplit() && !missing && !item.isEmpty();
+                    let controlHeight = (missing || item.isEmpty()) ? 110 : 190;
                     let borderColor = selected
                         ? this.props.theme.palette.primary.main
                         : (isDarkMode() ? "#444" : "#DDD");
@@ -292,14 +279,16 @@ export const MainPage =
                                     </Typography>
                                 )}
                             </div>
-                            <div style={{ position: "relative", width: "100%", height: controlHeight }}>
+                            <div style={{ position: "relative", width: "100%", height: fitContent ? undefined : controlHeight }}>
                                 {missing ? (
                                     <div style={{ marginLeft: 40, marginTop: 20 }}>
                                         <Typography variant="body1" color="error">Plugin is not installed.</Typography>
                                         <Typography variant="body2">{item.uri}</Typography>
                                     </div>
                                 ) : (
-                                    GetControlView(item, false, () => { })
+                                    <FitContentContext.Provider value={fitContent}>
+                                        {GetControlView(item, false, () => { })}
+                                    </FitContentContext.Provider>
                                 )}
                             </div>
                         </div>

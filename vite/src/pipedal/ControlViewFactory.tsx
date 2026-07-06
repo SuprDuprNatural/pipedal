@@ -51,16 +51,6 @@ let pluginFactories: IControlViewFactory[] = [
 ];
 
 
-// True if the plugin has a specialized control view (which may be taller
-// than a generic row-of-dials layout).
-export function HasCustomControlView(uri: string): boolean {
-    for (let i = 0; i < pluginFactories.length; ++i) {
-        if (pluginFactories[i].uri === uri)
-            return true;
-    }
-    return false;
-}
-
 export function GetControlView(
     pedalboardItem: PedalboardItem | null,
     showModUi: boolean,
@@ -73,12 +63,12 @@ export function GetControlView(
     }
     if (pedalboardItem.isStart() || pedalboardItem.isEnd()) {
         return (
-            <PluginControlView instanceId={pedalboardItem.instanceId} 
-                item={pedalboardItem} 
+            <PluginControlView instanceId={pedalboardItem.instanceId}
+                item={pedalboardItem}
                 showModGui={showModUi}
                 onSetShowModGui={(instanceId, showModGui) => {
                     onSetShowModGui?.(instanceId, showModGui);
-                }}  
+                }}
                 />
         );
     }
@@ -105,7 +95,7 @@ export function GetControlView(
                 <PluginControlView instanceId={pedalboardItem.instanceId} item={pedalboardItem} showModGui={showModUi}
                     onSetShowModGui={(instanceId, showModGui) => {
                         onSetShowModGui?.(instanceId, showModGui);
-                    }} 
+                    }}
                 />
             )
         }

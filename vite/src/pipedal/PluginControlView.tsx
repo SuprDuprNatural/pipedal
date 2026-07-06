@@ -17,7 +17,7 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { ReactNode } from 'react';
+import React, { ReactNode } from 'react';
 import { Theme } from '@mui/material/styles';
 import WithStyles, { withTheme } from './WithStyles';
 import { createStyles } from './WithStyles';
@@ -168,6 +168,24 @@ const styles = (theme: Theme) => createStyles({
         paddingBottom: "96px",
         overflowX: "hidden",
         overflowY: "auto",
+    }),
+    fitContentFrame: css({
+        display: "block",
+        position: "relative",
+        width: "100%",
+        paddingTop: "8px",
+        paddingBottom: "0px",
+        overflowX: "hidden",
+        overflowY: "hidden"
+    }),
+    frameScrollFitContent: css({
+        display: "block",
+        position: "relative",
+        width: "100%",
+        paddingTop: "0px",
+        paddingBottom: "0px",
+        overflowX: "hidden",
+        overflowY: "hidden"
     }),
     vuMeterL: css({
         position: "absolute",
@@ -357,6 +375,12 @@ export interface ControlViewCustomization {
 
 }
 
+// When true, PluginControlViews size to the natural height of their controls
+// with no internal scrolling (used by the rack view, where the page scrolls
+// instead). A context so that specialized views that wrap PluginControlView
+// inherit it without plumbing.
+export const FitContentContext = React.createContext<boolean>(false);
+
 export interface PluginControlViewProps extends WithStyles<typeof styles> {
     theme: Theme;
     instanceId: number;
@@ -384,7 +408,14 @@ type PluginControlViewState = {
 const PluginControlView =
     withTheme(withStyles(
         class extends ResizeResponsiveComponent<PluginControlViewProps, PluginControlViewState> {
+            static contextType = FitContentContext;
+            declare context: React.ContextType<typeof FitContentContext>;
+
             model: PiPedalModel;
+
+            fitContent(): boolean {
+                return this.context === true;
+            }
 
             constructor(props: PluginControlViewProps) {
                 super(props);
@@ -1002,6 +1033,10 @@ const PluginControlView =
                     gridClass = classes.noScrollGrid;
                     scrollClass = classes.frameScrollNone;
                 }
+                if (this.fitContent()) {
+                    gridClass = classes.normalGrid; // wrapping grid, natural height
+                    scrollClass = classes.frameScrollFitContent;
+                }
                 let controlNodes: ControlNodes;
 
                 controlNodes = this.getStandardControlNodes(plugin, controlValues);
@@ -1027,11 +1062,11 @@ const PluginControlView =
                                 nodes
                             }
                             {/* Extra space to allow scrolling right to the end in lascape especially */}
-                            {!this.fullScreen() && (
+                            {!this.fullScreen() && !this.fitContent() && (
                                 <div style={{ flex: "0 0 40px", width: 40, height: 40 }} />
                             )}
                             {
-                                (!this.state.landscapeGrid) && (!this.fullScreen()) && (
+                                (!this.state.landscapeGrid) && (!this.fullScreen()) && (!this.fitContent()) && (
                                     <div style={{ flex: "0 1 100%", width: "0px", height: 40 }} />
                                 )
                             }
@@ -1059,6 +1094,10 @@ const PluginControlView =
 
                 if (this.fullScreen() || this.props.showModGui) {
                     frameClass = classes.noScrollFrame;
+                }
+                if (this.fitContent()) {
+                    vuMeterRClass = classes.vuMeterR;
+                    frameClass = classes.fitContentFrame;
                 }
 
 
