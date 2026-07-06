@@ -16,13 +16,18 @@ export default defineConfig({
   plugins: [react(),svgr()],
   server: {
     proxy: {
+      '/pipedal': {
+        target: process.env.PIPEDAL_SERVER ?? 'http://localhost:8080',
+        ws: true,
+        changeOrigin: !!process.env.PIPEDAL_SERVER,
+      },
       '/resources': {
-        target: 'http://localhost:8080',
-        changeOrigin: false,
+        target: process.env.PIPEDAL_SERVER ?? 'http://localhost:8080',
+        changeOrigin: !!process.env.PIPEDAL_SERVER,
       },
       '^/var/.*': {
-        target: 'http://localhost:8080',
-        changeOrigin: false,
+        target: process.env.PIPEDAL_SERVER ?? 'http://localhost:8080',
+        changeOrigin: !!process.env.PIPEDAL_SERVER,
       },
     }
 }

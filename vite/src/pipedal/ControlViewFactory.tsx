@@ -51,8 +51,18 @@ let pluginFactories: IControlViewFactory[] = [
 ];
 
 
+// True if the plugin has a specialized control view (which may be taller
+// than a generic row-of-dials layout).
+export function HasCustomControlView(uri: string): boolean {
+    for (let i = 0; i < pluginFactories.length; ++i) {
+        if (pluginFactories[i].uri === uri)
+            return true;
+    }
+    return false;
+}
+
 export function GetControlView(
-    pedalboardItem: PedalboardItem | null, 
+    pedalboardItem: PedalboardItem | null,
     showModUi: boolean,
     onSetShowModGui: (instanceId: number, showModGui: boolean) => void
 ): React.ReactNode {

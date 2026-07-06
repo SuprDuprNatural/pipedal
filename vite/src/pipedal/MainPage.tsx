@@ -39,13 +39,15 @@ import Typography from '@mui/material/Typography';
 import PedalboardView from './PedalboardView';
 import { PiPedalStateError } from './PiPedalError';
 import AddIcon from '@mui/icons-material/Add';
+import ViewAgendaOutlinedIcon from '@mui/icons-material/ViewAgendaOutlined';
+import WebAssetOutlinedIcon from '@mui/icons-material/WebAssetOutlined';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Fade from '@mui/material/Fade';
 import Divider from '@mui/material/Divider';
 import ResizeResponsiveComponent from './ResizeResponsiveComponent';
 import PluginInfoDialog from './PluginInfoDialog';
-import { GetControlView } from './ControlViewFactory';
+import { GetControlView, HasCustomControlView } from './ControlViewFactory';
 import MidiBindingsDialog from './MidiBindingsDialog';
 import PluginPresetSelector from './PluginPresetSelector';
 import OldDeleteIcon from "./svg/old_delete_outline_24dp.svg?react";
@@ -66,6 +68,23 @@ import { css } from '@emotion/react';
 import { setDefaultModGuiPreference } from './ModGuiHost';
 import PluginNameDialog from './PluginNameDialog';
 
+
+const RACK_VIEW_PREFERENCE_KEY = "pipedal.rackView";
+
+function getRackViewPreference(): boolean {
+    try {
+        return window.localStorage.getItem(RACK_VIEW_PREFERENCE_KEY) === "1";
+    } catch {
+        return false;
+    }
+}
+function setRackViewPreference(value: boolean): void {
+    try {
+        window.localStorage.setItem(RACK_VIEW_PREFERENCE_KEY, value ? "1" : "0");
+    } catch {
+        // localStorage unavailable; preference just won't persist.
+    }
+}
 
 const SPLIT_CONTROLBAR_THRESHHOLD = 750;
 const SHOW_ICON_THRESHHOLD = 475;
@@ -135,6 +154,7 @@ interface MainState {
     screenHeight: number;
     displayNameDialogOpen: boolean;
     showModUi: boolean;
+    rackView: boolean;
 
 
 
@@ -183,7 +203,8 @@ export const MainPage =
                         horizontalScrollLayout: this.windowSize.height < HORIZONTAL_CONTROL_SCROLL_HEIGHT_BREAK,
                         showMidiBindingsDialog: false,
                         screenHeight: this.windowSize.height,
-                        showModUi: false
+                        showModUi: false,
+                        rackView: getRackViewPreference()
 
 
                     };
@@ -199,6 +220,109 @@ export const MainPage =
 
                 handleEditPluginDisplayName() {
                     this.setState({ displayNameDialogOpen: true });
+                }
+                handleRackViewToggle() {
+                    let newValue = !this.state.rackView;
+                    setRackViewPreference(newValue);
+                    this.setState({ rackView: newValue });
+                }
+
+                renderRackItem(item: PedalboardItem): React.ReactNode {
+                    let classes = withStyles.getClasses(this.props);
+                    let uiPlugin = item.isSplit() ? null : this.model.getUiPlugin(item.uri);
+                    let title: string;
+                    if (item.isSplit()) {
+                        title = "Split";
+                    } else {
+                        title = item.title || uiPlugin?.name || item.pluginName || "(empty)";
+                    }
+                    let missing = !item.isSplit() && !item.isEmpty() && !uiPlugin;
+                    let selected = item.instanceId === this.state.selectedPedal;
+                    // Estimate a control-area height that shows every control
+                    // row without an inner scroll; the generic control view
+                    // wraps ~100px-wide controls into ~144px-tall rows.
+                    let controlHeight = 190;
+                    if (missing || item.isEmpty()) {
+                        controlHeight = 110;
+                    } else if (!item.isSplit() && HasCustomControlView(item.uri)) {
+                        controlHeight = this.windowSize.width < 500 ? 380 : 300;
+                    } else if (uiPlugin) {
+                        // dropdown (enum) controls render about twice as wide
+                        // as a dial
+                        let units = 0;
+                        for (let c of uiPlugin.controls) {
+                            units += (c.enumeration_property || c.scale_points.length > 2) ? 2 : 1;
+                        }
+                        let capacity = Math.max(2, Math.floor((this.windowSize.width - 60) / 100));
+                        let rows = Math.max(1, Math.ceil(units / capacity));
+                        controlHeight = rows * 144 + 46;
+                    }
+                    let borderColor = selected
+                        ? this.props.theme.palette.primary.main
+                        : (isDarkMode() ? "#444" : "#DDD");
+                    return (
+                        <div key={item.instanceId}
+                            style={{
+                                border: "1px solid " + borderColor,
+                                borderLeft: (selected ? "3px" : "1px") + " solid "
+                                    + (selected ? this.props.theme.palette.primary.main : borderColor),
+                                borderRadius: 8, margin: "8px 12px", overflow: "hidden"
+                            }}>
+                            <div onClick={() => this.onSelectionChanged(item.instanceId)}
+                                style={{
+                                    display: "flex", flexFlow: "row nowrap", alignItems: "center",
+                                    height: 40, paddingLeft: 8, paddingRight: 16, cursor: "pointer",
+                                    background: isDarkMode() ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)"
+                                }}>
+                                <div style={{ flex: "0 0 auto", width: 56 }}>
+                                    {(uiPlugin) && (
+                                        <Switch color="secondary" size="small" checked={item.isEnabled}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={(e) => {
+                                                this.model.setPedalboardItemEnabled(item.instanceId, e.target.checked);
+                                            }} />
+                                    )}
+                                </div>
+                                <Typography noWrap className={classes.title} style={{ flex: "0 1 auto" }}>
+                                    {title}
+                                </Typography>
+                                {(this.state.displayAuthor && uiPlugin && item.title) && (
+                                    <Typography noWrap className={classes.author} style={{ flex: "0 1 auto" }}>
+                                        {uiPlugin.name}
+                                    </Typography>
+                                )}
+                            </div>
+                            <div style={{ position: "relative", width: "100%", height: controlHeight }}>
+                                {missing ? (
+                                    <div style={{ marginLeft: 40, marginTop: 20 }}>
+                                        <Typography variant="body1" color="error">Plugin is not installed.</Typography>
+                                        <Typography variant="body2">{item.uri}</Typography>
+                                    </div>
+                                ) : (
+                                    GetControlView(item, false, () => { })
+                                )}
+                            </div>
+                        </div>
+                    );
+                }
+
+                renderRackView(): React.ReactNode {
+                    let pedalboard = this.state.pedalboard;
+                    if (!pedalboard) {
+                        return (<div />);
+                    }
+                    let items: PedalboardItem[] = [];
+                    for (let item of pedalboard.itemsGenerator()) {
+                        if (item.isStart() || item.isEnd())
+                            continue;
+                        items.push(item);
+                    }
+                    return (
+                        <div style={{ width: "100%", height: "100%", overflowY: "auto", overflowX: "hidden" }}>
+                            {items.map((item) => this.renderRackItem(item))}
+                            <div style={{ height: 24 }} />
+                        </div>
+                    );
                 }
                 onInsertPedal(instanceId: number) {
                     this.setAddMenuAnchorEl(null);
@@ -691,6 +815,18 @@ export const MainPage =
                                     <div style={{ flex: "1 1 1px" }}>
 
                                     </div>
+                                    <div style={{ flex: "0 0 auto" }}>
+                                        <IconButtonEx
+                                            tooltip={this.state.rackView ? "Show selected effect only" : "Show all effects (rack view)"}
+                                            onClick={() => this.handleRackViewToggle()}
+                                            size="large">
+                                            {this.state.rackView ? (
+                                                <WebAssetOutlinedIcon style={{ height: 24, width: 24, color: this.props.theme.palette.text.primary, opacity: 0.6 }} />
+                                            ) : (
+                                                <ViewAgendaOutlinedIcon style={{ height: 24, width: 24, color: this.props.theme.palette.text.primary, opacity: 0.6 }} />
+                                            )}
+                                        </IconButtonEx>
+                                    </div>
                                     {this.props.enableStructureEditing && (
                                         <div style={{ flex: "0 0 auto", display: "flex", flexFlow: "row nowrap", alignItems: "center" }}>
                                             <div style={{ flex: "0 0 auto" }}>
@@ -768,9 +904,11 @@ export const MainPage =
                                     </div>
                                 )
                             }
-                            <div id="mainPageControls" className={horizontalScrollLayout ? classes.controlContentSmall : classes.controlContent}>
+                            <div id="mainPageControls" className={this.state.rackView ? classes.controlContent : (horizontalScrollLayout ? classes.controlContentSmall : classes.controlContent)}>
                                 {
-                                    missing ? (
+                                    this.state.rackView ? (
+                                        this.renderRackView()
+                                    ) : missing ? (
                                         <div style={{ marginLeft: 40, marginTop: 20 }}>
                                             <Typography variant="body1" paragraph={true}>Error: Plugin is not installed.</Typography>
                                             <Typography variant="body2" paragraph={true}>{pluginUri}</Typography>

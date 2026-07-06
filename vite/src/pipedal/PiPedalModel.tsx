@@ -1388,6 +1388,13 @@ export class PiPedalModel //implements PiPedalModel
                 socket_server_address = window.location.hostname;
             }
             if (!socket_server_port) socket_server_port = 8080;
+            if ((import.meta as any).env?.DEV) {
+                // In dev, stay same-origin and let the vite dev server proxy
+                // /pipedal, /var and /resources to the pipedald server
+                // (see server.proxy in vite.config.ts).
+                socket_server_address = window.location.hostname;
+                socket_server_port = parseInt(window.location.port) || 80;
+            }
             let socket_server = this.makeSocketServerUrl(socket_server_address, socket_server_port);
             let var_server_url = this.makeVarServerUrl("http", socket_server_address, socket_server_port);
             this.modResourcesUrl = this.makeModResourceUrl("http", socket_server_address, socket_server_port);
