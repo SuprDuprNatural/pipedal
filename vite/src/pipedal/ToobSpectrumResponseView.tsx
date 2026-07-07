@@ -56,7 +56,8 @@ const styles = (theme: Theme) => createStyles({
 
 interface ToobSpectrumResponseProps extends WithStyles<typeof styles> {
     instanceId: number;
-
+    width?: number;
+    height?: number;
 }
 interface ToobSpectrumResponseState {
     path: string;
@@ -73,6 +74,9 @@ const ToobSpectrumResponseView =
             model: PiPedalModel;
 
             customizationId: number = 1;
+
+            plotWidth(): number { return this.props.width ?? PLOT_WIDTH; }
+            plotHeight(): number { return this.props.height ?? PLOT_HEIGHT; }
 
             constructor(props: ToobSpectrumResponseProps) {
                 super(props);
@@ -212,7 +216,7 @@ const ToobSpectrumResponseView =
             logMaxF = Math.log(this.maxF);
 
             toX(f: number): number {
-                let width = PLOT_WIDTH - 8;
+                let width = this.plotWidth() - 8;
                 return (Math.log(f) - this.logMinF) * width / (this.logMaxF - this.logMinF);
             }
 
@@ -220,8 +224,8 @@ const ToobSpectrumResponseView =
                 
                 let ss = new SvgPathBuilder();
 
-                let width = PLOT_WIDTH;
-                let height = PLOT_HEIGHT;
+                let width = this.plotWidth();
+                let height = this.plotHeight();
 
                 for (let db = -10; db >= -this.state.scale; db -= 10) {
                     let y = height * db / -this.state.scale;
@@ -260,7 +264,7 @@ const ToobSpectrumResponseView =
                 
                 let ss = new SvgPathBuilder();
 
-                let height = PLOT_HEIGHT;
+                let height = this.plotHeight();
 
                 let minF = this.state.minF;
                 let maxF = this.state.maxF;
@@ -284,9 +288,9 @@ const ToobSpectrumResponseView =
             render() {
                 const classes = withStyles.getClasses(this.props);
                 return (
-                    <div className={classes.frame} style={{ position: "relative" }} >
+                    <div className={classes.frame} style={{ position: "relative", width: this.plotWidth(), height: this.plotHeight() }} >
                         <div style={{ position: "absolute", left: 0, top: 0 }}>
-                            <svg fill="#660" width={PLOT_WIDTH } height={PLOT_HEIGHT} preserveAspectRatio='none' 
+                            <svg fill="#660" width={this.plotWidth()} height={this.plotHeight()} preserveAspectRatio='none' 
                                     viewBox={"0 0 " + this.numPoints + " " + 1000} stroke="none" opacity="1.0"
                             >
                                 <path d={this.state.holdPath} />
@@ -294,25 +298,25 @@ const ToobSpectrumResponseView =
                         </div> 
 
                         <div style={{ position: "absolute", left: 0, top: 0 }}>
-                            <svg fill="#0C4" width={PLOT_WIDTH } height={PLOT_HEIGHT } preserveAspectRatio='none' 
+                            <svg fill="#0C4" width={this.plotWidth()} height={this.plotHeight()} preserveAspectRatio='none' 
                                 viewBox={"0 0 " + this.numPoints + " " + 1000} stroke="#0C4" strokeWidth="0.5" opacity="1.0"
                             >
                                 <path d={this.state.path} />
                             </svg>
                         </div>
                         <div style={{ position: "absolute", left: 0, top: 0 }}>
-                            <svg width={PLOT_WIDTH } height={PLOT_HEIGHT} stroke="#FFF" strokeWidth="0.9" opacity="0.3"
+                            <svg width={this.plotWidth()} height={this.plotHeight()} stroke="#FFF" strokeWidth="0.9" opacity="0.3"
                             >
                                 <path d={this.minorGrid()} />
                             </svg>
                         </div>
                         <div style={{ position: "absolute", left: 0, top: 0 }}>
-                            <svg width={PLOT_WIDTH} height={PLOT_HEIGHT} stroke="#FFF" strokeWidth="0.9" opacity="0.5"
+                            <svg width={this.plotWidth()} height={this.plotHeight()} stroke="#FFF" strokeWidth="0.9" opacity="0.5"
                             >
                                 <path d={this.majorGrid()} />
                             </svg>
                         </div>
-                        <div className={classes.frameShadow} style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}>
+                        <div className={classes.frameShadow} style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, width: this.plotWidth(), height: this.plotHeight() }}>
                         </div>
 
 
