@@ -64,6 +64,16 @@ const VU_TICKS: MeterTick[] = [
 const SPECTRUM_CONTROLS_WIDTH = 200;
 const SPECTRUM_PLOT_HEIGHT = 260;
 
+// Layout budget for sizing the plot. We measure the width-authoritative
+// scroll frame (see findFrame) and give the plot everything left over after
+// the grid's own padding, the plot frame's margins, and — when there's room —
+// the controls column beside it.
+const SPECTRUM_GRID_PAD = 80;      // PluginControlView grid paddingLeft(30)+Right(45), + slack
+const SPECTRUM_PLOT_MARGIN = 16;   // ToobSpectrumResponseView frame marginLeft(8)+Right(8)
+const SPECTRUM_CONTROLS_COL = SPECTRUM_CONTROLS_WIDTH + 16; // column width + its marginLeft/gap
+const SPECTRUM_MIN_PLOT = 280;     // never narrower than this
+const SPECTRUM_MIN_WIDE = 420;     // below this, drop the side column and let controls wrap under
+
 interface SuprSpectrumControlProps {
     instanceId: number;
     controls: React.ReactNode[];
@@ -71,35 +81,70 @@ interface SuprSpectrumControlProps {
 }
 interface SuprSpectrumControlState {
     plotWidth: number;
+    controlsBeside: boolean;
 }
 
 class SuprSpectrumControl extends React.Component<SuprSpectrumControlProps, SuprSpectrumControlState> {
     private rootRef: React.RefObject<HTMLDivElement | null>;
     private resizeObserver?: ResizeObserver;
+    private frameEl: HTMLElement | null = null;
 
     constructor(props: SuprSpectrumControlProps) {
         super(props);
         this.rootRef = React.createRef();
-        this.state = { plotWidth: 480 };
+        this.state = { plotWidth: 480, controlsBeside: true };
+    }
+
+    // Walk up to the width-authoritative scroll frame. Our node lives inside
+    // shrink-to-fit wrappers (controlPadding, and a fit-content landscape
+    // grid), so measuring ourselves is circular and the plot never grows.
+    // The scroll frame (frameScrollLandscape / frameScrollFitContent) is the
+    // nearest block-level ancestor with a bounded width in both view modes;
+    // identify it by display:block + a clipping/scrolling overflowX.
+    private findFrame(): HTMLElement | null {
+        let el: HTMLElement | null = this.rootRef.current?.parentElement ?? null;
+        for (let i = 0; i < 12 && el; ++i, el = el.parentElement) {
+            const cs = window.getComputedStyle(el);
+            const ox = cs.overflowX;
+            if (cs.display === "block" && (ox === "hidden" || ox === "auto" || ox === "scroll")) {
+                return el;
+            }
+        }
+        return null;
     }
 
     updateWidth() {
-        const el = this.rootRef.current;
-        if (!el)
+        const root = this.rootRef.current;
+        if (!root)
             return;
-        const total = el.getBoundingClientRect().width;
-        // room for the controls column unless we're so narrow they wrap below
-        const forControls = total > 560 ? SPECTRUM_CONTROLS_WIDTH + 16 : 0;
-        const plotWidth = Math.max(280, Math.floor(total - forControls - 20));
-        if (Math.abs(plotWidth - this.state.plotWidth) > 2) {
-            this.setState({ plotWidth: plotWidth });
+        if (!this.frameEl || !this.frameEl.isConnected) {
+            this.frameEl = this.findFrame();
+        }
+        let avail: number;
+        if (this.frameEl) {
+            const cs = window.getComputedStyle(this.frameEl);
+            const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+            avail = this.frameEl.clientWidth - padX;
+        } else {
+            avail = root.getBoundingClientRect().width; // fallback: measure self
+        }
+        const usable = avail - SPECTRUM_GRID_PAD - SPECTRUM_PLOT_MARGIN;
+        let controlsBeside = usable - SPECTRUM_CONTROLS_COL >= SPECTRUM_MIN_WIDE;
+        let plotWidth = controlsBeside ? usable - SPECTRUM_CONTROLS_COL : usable;
+        plotWidth = Math.max(SPECTRUM_MIN_PLOT, Math.floor(plotWidth));
+        if (Math.abs(plotWidth - this.state.plotWidth) > 2 || controlsBeside !== this.state.controlsBeside) {
+            this.setState({ plotWidth: plotWidth, controlsBeside: controlsBeside });
         }
     }
 
     componentDidMount() {
+        this.frameEl = this.findFrame();
         this.resizeObserver = new ResizeObserver(() => this.updateWidth());
-        if (this.rootRef.current)
-            this.resizeObserver.observe(this.rootRef.current);
+        // Observe the frame so the plot follows window resizes; fall back to
+        // observing ourselves if the frame couldn't be located.
+        const observed = this.frameEl ?? this.rootRef.current;
+        if (observed)
+            this.resizeObserver.observe(observed);
         this.updateWidth();
     }
     componentWillUnmount() {
@@ -119,9 +164,10 @@ class SuprSpectrumControl extends React.Component<SuprSpectrumControlProps, Supr
                         height={SPECTRUM_PLOT_HEIGHT} />
                 </div>
                 <div style={{
-                    flex: "0 0 auto", width: SPECTRUM_CONTROLS_WIDTH,
+                    flex: this.state.controlsBeside ? "0 0 auto" : "1 1 100%",
+                    width: this.state.controlsBeside ? SPECTRUM_CONTROLS_WIDTH : "auto",
                     display: "flex", flexFlow: "row wrap",
-                    justifyContent: "flex-start", marginLeft: 8
+                    justifyContent: "flex-start", marginLeft: this.state.controlsBeside ? 8 : 0
                 }}>
                     {this.props.controls}
                 </div>
