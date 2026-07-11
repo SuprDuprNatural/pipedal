@@ -20,6 +20,8 @@
 
 #include "PiPedalCommon.hpp"
 #include "AudioHost.hpp"
+#include "AirplayInputStream.hpp"
+#include "AirplaySettings.hpp"
 #include "util.hpp"
 #include <lv2/atom/atom.h>
 #include "SchedulerPriority.hpp"
@@ -482,6 +484,10 @@ private:
 
     std::unique_ptr<AudioDriver> audioDriver;
 
+    AirplayInputStream::ptr airplayInput;
+    std::atomic<bool> airplayEnabled = false;
+    std::atomic<float> airplayVolume = 0.7f;
+
     std::recursive_mutex mutex;
     int64_t overrunGracePeriodSamples = 0;
 
@@ -588,6 +594,8 @@ private:
         }
 
         audioDriver->Close();
+
+        airplayInput = nullptr; // safe: the realtime thread has stopped.
 
         StopReaderThread();
 
@@ -1401,6 +1409,11 @@ private:
             }
             ProcessLv2Pedalboard(nframes);
 
+            if (airplayInput)
+            {
+                airplayInput->MixOutput(audioDriver->MainOutputBuffers(), nframes);
+            }
+
             if (pParameterRequests != nullptr)
             {
                 this->realtimeWriter.ParameterRequestComplete(pParameterRequests);
@@ -1883,6 +1896,21 @@ public:
             this->overrunGracePeriodSamples = (uint64_t)(((uint64_t)this->sampleRate) * OVERRUN_GRACE_PERIOD_S);
             this->vuSamplesPerUpdate = (size_t)(sampleRate * VU_UPDATE_RATE_S);
 
+            try
+            {
+                this->airplayInput = std::make_shared<AirplayInputStream>(AIRPLAY_FIFO_PATH, this->sampleRate);
+                this->airplayInput->SetVolume(this->airplayVolume);
+                if (this->airplayEnabled)
+                {
+                    this->airplayInput->Start();
+                }
+            }
+            catch (const std::exception &e)
+            {
+                Lv2Log::error(SS("Can't open AirPlay input stream. " << e.what()));
+                this->airplayInput = nullptr;
+            }
+
             active = true;
             audioStopped = false;
             audioDriver->Activate();
@@ -2010,6 +2038,40 @@ public:
         if (active && this->currentPedalboard)
         {
             hostWriter.SetOutputVolume(value);
+        }
+    }
+
+    virtual void SetAirplayStreamEnabled(bool enabled)
+    {
+        std::lock_guard guard(mutex);
+        this->airplayEnabled = enabled;
+        if (airplayInput)
+        {
+            try
+            {
+                if (enabled)
+                {
+                    airplayInput->Start();
+                }
+                else
+                {
+                    airplayInput->Stop();
+                }
+            }
+            catch (const std::exception &e)
+            {
+                Lv2Log::error(SS("Can't start AirPlay input stream. " << e.what()));
+            }
+        }
+    }
+
+    virtual void SetAirplayVolume(float volume)
+    {
+        std::lock_guard guard(mutex);
+        this->airplayVolume = volume;
+        if (airplayInput)
+        {
+            airplayInput->SetVolume(volume);
         }
     }
 

@@ -2132,6 +2132,39 @@ void Storage::SetJackServerSettings(const pipedal::JackServerSettings& jackConfi
     }
 }
 
+pipedal::AirplaySettings Storage::GetAirplaySettings()
+{
+    AirplaySettings result;
+    std::filesystem::path fileName = this->dataRoot / "AirplayConfig.json";
+    std::ifstream f;
+    f.open(fileName);
+    if (f.is_open())
+    {
+        try
+        {
+            json_reader reader(f);
+            reader.read(&result);
+        }
+        catch (const std::exception & /*ignored*/)
+        {
+            result = AirplaySettings();
+        }
+    }
+    return result;
+}
+
+void Storage::SetAirplaySettings(const pipedal::AirplaySettings& airplaySettings)
+{
+    std::filesystem::path fileName = this->dataRoot / "AirplayConfig.json";
+    pipedal::ofstream_synced f;
+    f.open(fileName);
+    if (f.is_open())
+    {
+        json_writer writer(f, false);
+        writer.write(airplaySettings);
+    }
+}
+
 void Storage::SetSystemMidiBindings(const std::vector<MidiBinding>& bindings)
 {
     std::filesystem::path fileName = this->dataRoot / "config" / "SystemMidiBindings.json";

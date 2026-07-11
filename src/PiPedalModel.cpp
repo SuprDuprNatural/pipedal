@@ -461,6 +461,14 @@ void PiPedalModel::Load()
 #endif
     }
 
+    {
+        // the pipedal-airplay service (if enabled) is started by systemd; we just
+        // need to bring up the FIFO reader and set the stream gain.
+        AirplaySettings airplaySettings = storage.GetAirplaySettings();
+        audioHost->SetAirplayVolume(airplaySettings.volume_);
+        audioHost->SetAirplayStreamEnabled(airplaySettings.enabled_);
+    }
+
     RestartAudio();
 }
 
@@ -1615,6 +1623,81 @@ bool PiPedalModel::GetShowStatusMonitor()
     return storage.GetShowStatusMonitor();
 }
 
+AirplaySettings PiPedalModel::GetAirplaySettings()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex); // copy atomically.
+    return storage.GetAirplaySettings();
+}
+
+void PiPedalModel::PreviewAirplayVolume(float volume)
+{
+    audioHost->SetAirplayVolume(volume);
+}
+
+static std::string GetAirplayServiceName()
+{
+    ServiceConfiguration deviceIdFile;
+    deviceIdFile.Load();
+    WifiConfigSettings wifiSettings;
+    wifiSettings.Load();
+    // same naming rules as the dnsSD announcement.
+    std::string serviceName = wifiSettings.hotspotName_;
+    if (serviceName == "")
+    {
+        serviceName = deviceIdFile.deviceName;
+    }
+    if (serviceName == "")
+    {
+        serviceName = "PiPedal";
+    }
+    return serviceName;
+}
+
+void PiPedalModel::UpdateAirplayServiceConfiguration(const AirplaySettings &airplaySettings)
+{
+    AirplayServiceConfiguration serviceConfiguration;
+    serviceConfiguration.enabled_ = airplaySettings.enabled_;
+    serviceConfiguration.name_ = GetAirplayServiceName();
+    uint32_t sampleRate = audioHost->GetSampleRate();
+    serviceConfiguration.sampleRate_ = sampleRate == 0 ? 48000 : sampleRate;
+    serviceConfiguration.fifoPath_ = AIRPLAY_FIFO_PATH;
+    adminClient.SetAirplayConfiguration(serviceConfiguration);
+}
+
+void PiPedalModel::SetAirplaySettings(const AirplaySettings &airplaySettings)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    AirplaySettings oldSettings = storage.GetAirplaySettings();
+    std::vector<IPiPedalModelSubscriber::ptr> t{subscribers.begin(), subscribers.end()};
+
+    if (airplaySettings.enabled_ != oldSettings.enabled_)
+    {
+        try
+        {
+            UpdateAirplayServiceConfiguration(airplaySettings);
+        }
+        catch (const std::exception &e)
+        {
+            Lv2Log::error(SS("Can't configure the AirPlay service. " << e.what()));
+            for (auto &subscriber : t)
+            {
+                subscriber->OnErrorMessage(e.what());
+                subscriber->OnAirplaySettingsChanged(oldSettings); // revert optimistic UI state.
+            }
+            return;
+        }
+    }
+    storage.SetAirplaySettings(airplaySettings);
+    audioHost->SetAirplayVolume(airplaySettings.volume_);
+    audioHost->SetAirplayStreamEnabled(airplaySettings.enabled_);
+
+    for (auto &subscriber : t)
+    {
+        subscriber->OnAirplaySettingsChanged(airplaySettings);
+    }
+}
+
 JackConfiguration PiPedalModel::GetJackConfiguration()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex); // copy atomically.
@@ -2236,6 +2319,20 @@ void PiPedalModel::SetJackServerSettings(const JackServerSettings &jackServerSet
 
     guard.unlock();
     RestartAudio();
+
+    // keep the AirPlay service's ALSA config in sync with the (possibly changed) sample rate.
+    try
+    {
+        AirplaySettings airplaySettings = GetAirplaySettings();
+        if (airplaySettings.enabled_)
+        {
+            UpdateAirplayServiceConfiguration(airplaySettings);
+        }
+    }
+    catch (const std::exception &e)
+    {
+        Lv2Log::error(SS("Can't reconfigure the AirPlay service. " << e.what()));
+    }
 
 #endif
 #if JACK_HOST

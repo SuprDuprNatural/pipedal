@@ -33,6 +33,7 @@
 #include "FilePropertyDirectoryTree.hpp"
 #include "AlsaSequencer.hpp"
 #include "ChannelRouterSettings.hpp"
+#include "AirplaySettings.hpp"
 
 
 
@@ -157,6 +158,9 @@ public:
 
     JackServerSettings GetJackServerSettings();
     void SetJackServerSettings(const pipedal::JackServerSettings&jackServerSettings);
+
+    AirplaySettings GetAirplaySettings();
+    void SetAirplaySettings(const pipedal::AirplaySettings&airplaySettings);
 
     void LoadWifiConfigSettings();
     void LoadWifiDirectConfigSettings();

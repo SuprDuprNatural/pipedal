@@ -1599,6 +1599,28 @@ public:
     }
     REGISTER_MESSAGE_HANDLER(getShowStatusMonitor)
 
+    void handle_getAirplaySettings(int replyTo, json_reader *pReader)
+    {
+        Reply(replyTo, "getAirplaySettings", this->model.GetAirplaySettings());
+    }
+    REGISTER_MESSAGE_HANDLER(getAirplaySettings)
+
+    void handle_setAirplaySettings(int replyTo, json_reader *pReader)
+    {
+        AirplaySettings airplaySettings;
+        pReader->read(&airplaySettings);
+        this->model.SetAirplaySettings(airplaySettings);
+    }
+    REGISTER_MESSAGE_HANDLER(setAirplaySettings)
+
+    void handle_previewAirplayVolume(int replyTo, json_reader *pReader)
+    {
+        float value;
+        pReader->read(&value);
+        this->model.PreviewAirplayVolume(value);
+    }
+    REGISTER_MESSAGE_HANDLER(previewAirplayVolume)
+
     void handle_version(int replyTo, json_reader *pReader)
     {
         PiPedalVersion version(this->model);
@@ -2357,6 +2379,11 @@ private:
     virtual void OnShowStatusMonitorChanged(bool show)
     {
         Send("onShowStatusMonitorChanged", show);
+    }
+
+    virtual void OnAirplaySettingsChanged(const AirplaySettings &airplaySettings)
+    {
+        Send("onAirplaySettingsChanged", airplaySettings);
     }
 
     virtual void OnChannelRouterSettingsChanged(int64_t clientId, const ChannelRouterSettings &channelRouterSettings)

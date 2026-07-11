@@ -38,6 +38,7 @@ import MidiBinding from './MidiBinding';
 import { PluginUiPresets } from './PluginPreset';
 import WifiConfigSettings from './WifiConfigSettings';
 import WifiDirectConfigSettings from './WifiDirectConfigSettings';
+import AirplaySettings from './AirplaySettings';
 import GovernorSettings from './GovernorSettings';
 import WifiChannel from './WifiChannel';
 import AlsaDeviceInfo from './AlsaDeviceInfo';
@@ -573,6 +574,10 @@ export class PiPedalModel //implements PiPedalModel
 
     showStatusMonitor: ObservableProperty<boolean> = new ObservableProperty<boolean>(true);
 
+    airplaySettings: ObservableProperty<AirplaySettings> = new ObservableProperty<AirplaySettings>(new AirplaySettings());
+    // false if the server doesn't support the AirPlay receiver.
+    canAirplay: ObservableProperty<boolean> = new ObservableProperty<boolean>(false);
+
     pedalboard: ObservableProperty<Pedalboard> = new ObservableProperty<Pedalboard>(new Pedalboard());
     presetChanged: ObservableProperty<boolean> = new ObservableProperty<boolean>(false);
     selectedSnapshot: ObservableProperty<number> = new ObservableProperty<number>(-1);
@@ -889,6 +894,8 @@ export class PiPedalModel //implements PiPedalModel
         } else if (message === "onShowStatusMonitorChanged") {
             let value = body as boolean;
             this.showStatusMonitor.set(value);
+        } else if (message === "onAirplaySettingsChanged") {
+            this.airplaySettings.set(new AirplaySettings().deserialize(body));
         } else if (message === "onChannelRouterSettingsChanged") {
             let channelRouterSettingChangedBody = body as ChannelRouterSettingsChangedBody;
             let channelRouterSettings = new ChannelRouterSettings().deserialize(
@@ -1483,6 +1490,16 @@ export class PiPedalModel //implements PiPedalModel
             this.showStatusMonitor.set(
                 await this.getWebSocket().request<boolean>("getShowStatusMonitor")
             );
+            try {
+                this.airplaySettings.set(
+                    new AirplaySettings().deserialize(
+                        await this.getWebSocket().request<any>("getAirplaySettings")
+                    ));
+                this.canAirplay.set(true);
+            } catch (error) {
+                // server doesn't support the AirPlay receiver.
+                this.canAirplay.set(false);
+            }
             this.jackServerSettings.set(
                 new JackServerSettings().deserialize(
                     await this.getWebSocket().request<any>("getJackServerSettings")
@@ -2029,6 +2046,24 @@ export class PiPedalModel //implements PiPedalModel
 
     setShowStatusMonitor(show: boolean): void {
         this.webSocket?.send("setShowStatusMonitor", show);
+    }
+
+    setAirplayEnabled(enabled: boolean): void {
+        let settings = this.airplaySettings.get().clone();
+        settings.enabled = enabled;
+        // optimistic update; the server re-broadcasts the old settings if enabling fails.
+        this.airplaySettings.set(settings);
+        this.webSocket?.send("setAirplaySettings", settings);
+    }
+    setAirplayVolume(volume: number): void {
+        let settings = this.airplaySettings.get().clone();
+        settings.volume = volume;
+        // update immediately so the slider doesn't judder waiting for the server echo.
+        this.airplaySettings.set(settings);
+        this.webSocket?.send("setAirplaySettings", settings);
+    }
+    previewAirplayVolume(volume: number): void {
+        this.webSocket?.send("previewAirplayVolume", volume);
     }
 
     loadPedalboardPlugin(itemId: number, selectedUri: string): number {

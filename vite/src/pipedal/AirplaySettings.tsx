@@ -1,4 +1,4 @@
-// Copyright (c) Robin E.R. Davies
+// Copyright (c) 2026 SuprDuprNatural
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -17,37 +17,16 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#pragma once
+export default class AirplaySettings {
+    deserialize(input: any): AirplaySettings {
+        this.enabled = input.enabled;
+        this.volume = input.volume;
+        return this;
+    }
+    clone(): AirplaySettings {
+        return new AirplaySettings().deserialize(this);
+    }
 
-#include <string>
-#include "JackServerSettings.hpp"
-#include "AirplaySettings.hpp"
-#include "WifiConfigSettings.hpp"
-#include "WifiDirectConfigSettings.hpp"
-#include "UnixSocket.hpp"
-#include <mutex>
-
-namespace pipedal {
-
-
-class AdminClient {
-    bool WriteMessage(const char*message);
-public:
-    AdminClient();
-    ~AdminClient();
-    bool CanUseAdminClient();
-    bool RequestShutdown(bool restart);
-    bool SetJackServerConfiguration(const JackServerSettings & jackServerSettings);
-    void SetAirplayConfiguration(const AirplayServiceConfiguration & configuration);
-    void SetWifiConfig(const WifiConfigSettings & settings);
-    void SetWifiDirectConfig(const WifiDirectConfigSettings & settings);
-    void SetGovernorSettings(const std::string & governor);
-    void MonitorGovernor(const std::string &governor);
-    void UnmonitorGovernor();
-    void InstallUpdate(const std::string&filename);
-private:
-    std::mutex mutex;
-    UnixSocket socket;
-};
-
-} // namespace
+    enabled: boolean = false;
+    volume: number = 0.7; // 0..1
+}

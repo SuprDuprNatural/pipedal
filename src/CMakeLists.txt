@@ -266,6 +266,8 @@ set (PIPEDAL_SOURCES
     WebServerMod.cpp WebServerMod.hpp
     ModGui.cpp ModGui.hpp
     PipewireInputStream.cpp PipewireInputStream.hpp
+    AirplaySettings.cpp AirplaySettings.hpp
+    AirplayInputStream.cpp AirplayInputStream.hpp
     AudioFiles.cpp AudioFiles.hpp
     AudioFileMetadataReader.cpp AudioFileMetadataReader.hpp
     AudioFileMetadata.hpp AudioFileMetadata.cpp
@@ -876,6 +878,7 @@ add_executable(pipedaladmind AdminMain.cpp CommandLineParser.hpp
     UnixSocket.cpp UnixSocket.hpp
 
     SetWifiConfig.cpp SetWifiConfig.hpp
+    AirplaySettings.cpp AirplaySettings.hpp
     JackServerSettings.hpp JackServerSettings.cpp
     PiPedalAlsa.hpp PiPedalAlsa.cpp
     Lv2SystemdLogger.hpp Lv2SystemdLogger.cpp

@@ -90,6 +90,7 @@ namespace pipedal
         virtual void OnGovernorSettingsChanged(const std::string &governor) = 0;
         virtual void OnFavoritesChanged(const std::map<std::string, bool> &favorites) = 0;
         virtual void OnShowStatusMonitorChanged(bool show) = 0;
+        virtual void OnAirplaySettingsChanged(const AirplaySettings &airplaySettings) = 0;
         virtual void OnSystemMidiBindingsChanged(const std::vector<MidiBinding> &bindings) = 0;
         virtual void OnNotifyPathPatchPropertyChanged(int64_t instanceId, const std::string &pathPatchPropertyString, const std::string &atomString) = 0;
 
@@ -242,6 +243,8 @@ namespace pipedal
 
         void UpdateRealtimeVuSubscriptions();
         void UpdateRealtimeMonitorPortSubscriptions();
+
+        void UpdateAirplayServiceConfiguration(const AirplaySettings &airplaySettings);
 
         void RestartAudio(bool useDummyAudioDriver = false);
 
@@ -443,6 +446,10 @@ namespace pipedal
 
         void SetShowStatusMonitor(bool show);
         bool GetShowStatusMonitor();
+
+        AirplaySettings GetAirplaySettings();
+        void SetAirplaySettings(const AirplaySettings &airplaySettings);
+        void PreviewAirplayVolume(float volume);
 
         void SetWifiConfigSettings(const WifiConfigSettings &wifiConfigSettings);
         WifiConfigSettings GetWifiConfigSettings();

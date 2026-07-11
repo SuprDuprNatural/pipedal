@@ -103,6 +103,24 @@ bool AdminClient::SetJackServerConfiguration(const JackServerSettings &jackServe
     return WriteMessage(s.str().c_str());
 }
 
+void AdminClient::SetAirplayConfiguration(const AirplayServiceConfiguration &configuration)
+{
+    if (!CanUseAdminClient())
+    {
+        throw PiPedalException("Can't perform this operation when debugging.");
+    }
+    std::stringstream cmd;
+    cmd << "setAirplayConfiguration ";
+    json_writer writer(cmd, true);
+    writer.write(configuration);
+    cmd << '\n';
+    bool result = WriteMessage(cmd.str().c_str());
+    if (!result)
+    { // unexpected. Should throw exception on failure.
+        throw PiPedalException("Operation failed.");
+    }
+}
+
 void AdminClient::SetWifiConfig(const WifiConfigSettings &settings)
 {
     if (!CanUseAdminClient())

@@ -1,4 +1,4 @@
-// Copyright (c) Robin E.R. Davies
+// Copyright (c) 2026 SuprDuprNatural
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -18,36 +18,37 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
-
+#include <cstdint>
 #include <string>
-#include "JackServerSettings.hpp"
-#include "AirplaySettings.hpp"
-#include "WifiConfigSettings.hpp"
-#include "WifiDirectConfigSettings.hpp"
-#include "UnixSocket.hpp"
-#include <mutex>
+#include "json.hpp"
 
-namespace pipedal {
+namespace pipedal
+{
+    // FIFO through which shairport-sync streams raw PCM to pipedald.
+    // Referenced both by the pipedald FIFO reader and by the ALSA config
+    // written by pipedaladmind.
+    constexpr char AIRPLAY_FIFO_PATH[] = "/var/pipedal/airplay_fifo";
 
+    // User-facing AirPlay receiver settings, persisted to AirplayConfig.json.
+    class AirplaySettings
+    {
+    public:
+        bool enabled_ = false;
+        float volume_ = 0.7f; // 0..1
 
-class AdminClient {
-    bool WriteMessage(const char*message);
-public:
-    AdminClient();
-    ~AdminClient();
-    bool CanUseAdminClient();
-    bool RequestShutdown(bool restart);
-    bool SetJackServerConfiguration(const JackServerSettings & jackServerSettings);
-    void SetAirplayConfiguration(const AirplayServiceConfiguration & configuration);
-    void SetWifiConfig(const WifiConfigSettings & settings);
-    void SetWifiDirectConfig(const WifiDirectConfigSettings & settings);
-    void SetGovernorSettings(const std::string & governor);
-    void MonitorGovernor(const std::string &governor);
-    void UnmonitorGovernor();
-    void InstallUpdate(const std::string&filename);
-private:
-    std::mutex mutex;
-    UnixSocket socket;
-};
+        DECLARE_JSON_MAP(AirplaySettings);
+    };
 
-} // namespace
+    // Payload of the pipedaladmind "setAirplayConfiguration" command.
+    class AirplayServiceConfiguration
+    {
+    public:
+        bool enabled_ = false;
+        std::string name_;             // AirPlay service name shown to senders.
+        uint32_t sampleRate_ = 48000;  // current audio device sample rate.
+        std::string fifoPath_ = AIRPLAY_FIFO_PATH;
+
+        DECLARE_JSON_MAP(AirplayServiceConfiguration);
+    };
+
+} // namespace pipedal

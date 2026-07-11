@@ -39,7 +39,9 @@
 #include "Lv2SystemdLogger.hpp"
 #include "WifiConfigSettings.hpp"
 #include "SetWifiConfig.hpp"
+#include "AirplaySettings.hpp"
 #include "SysExec.hpp"
+#include <fstream>
 #include <filesystem>
 #include <thread>
 #include <mutex>
@@ -238,6 +240,125 @@ void InstallUpdate(const std::filesystem::path path)
     int rc = system(cmd.c_str());
 }
 
+static const char SHAIRPORT_BIN[] = "/usr/bin/shairport-sync";
+static const char AIRPLAY_ALSA_CONF_PATH[] = "/etc/alsa/conf.d/99-pipedal-airplay.conf";
+static const char AIRPLAY_SHAIRPORT_CONF_PATH[] = "/etc/pipedal/shairport-sync.conf";
+static const char AIRPLAY_SERVICE_PATH[] = "/etc/systemd/system/pipedal-airplay.service";
+
+static std::string sanitizeAirplayName(const std::string &name)
+{
+    std::string result;
+    for (char c : name)
+    {
+        if (c == '"' || c == '\\' || (unsigned char)c < 0x20)
+        {
+            continue;
+        }
+        result += c;
+    }
+    if (result.empty())
+    {
+        result = "PiPedal";
+    }
+    return result;
+}
+
+static void writeFileOrThrow(const std::filesystem::path &path, const std::string &content)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream f(path);
+    if (!f.is_open())
+    {
+        throw std::runtime_error(SS("Can't write " << path));
+    }
+    f << content;
+}
+
+bool setAirplayConfiguration(const AirplayServiceConfiguration &configuration)
+{
+    if (!configuration.enabled_)
+    {
+        silentSysExec("/usr/bin/systemctl disable --now pipedal-airplay.service");
+        return true;
+    }
+    if (!std::filesystem::exists(SHAIRPORT_BIN))
+    {
+        throw std::runtime_error(
+            "shairport-sync is not installed. Run 'sudo apt install shairport-sync', then try again.");
+    }
+
+    // ALSA device that converts whatever shairport-sync produces (44100 S16_LE)
+    // to the PiPedal device sample rate, and writes raw PCM to the FIFO that
+    // pipedald mixes into its main output.
+    writeFileOrThrow(AIRPLAY_ALSA_CONF_PATH, SS(
+        "# Written by pipedaladmind. Do not edit; changes will be overwritten.\n"
+        "pcm.pipedal_airplay_fifo {\n"
+        "    type file\n"
+        "    file \"" << configuration.fifoPath_ << "\"\n"
+        "    format \"raw\"\n"
+        "    slave {\n"
+        "        pcm \"null\"\n"
+        "    }\n"
+        "}\n"
+        "pcm.pipedal_airplay {\n"
+        "    type plug\n"
+        "    slave {\n"
+        "        pcm \"pipedal_airplay_fifo\"\n"
+        "        format S16_LE\n"
+        "        rate " << configuration.sampleRate_ << "\n"
+        "        channels 2\n"
+        "    }\n"
+        "}\n"));
+
+    // NOTE: compatible with shairport-sync 3.3.x (Debian bookworm); 3.3.x exits on
+    // unrecognized config options, so the backend is selected with -o alsa instead.
+    writeFileOrThrow(AIRPLAY_SHAIRPORT_CONF_PATH, SS(
+        "// Written by pipedaladmind. Do not edit; changes will be overwritten.\n"
+        "general = {\n"
+        "  name = \"" << sanitizeAirplayName(configuration.name_) << "\";\n"
+        "};\n"
+        "alsa = {\n"
+        "  output_device = \"pipedal_airplay\";\n"
+        "};\n"
+        "sessioncontrol = {\n"
+        "  session_timeout = 20;\n"
+        "};\n"));
+
+    writeFileOrThrow(AIRPLAY_SERVICE_PATH, SS(
+        "# Written by pipedaladmind. Do not edit; changes will be overwritten.\n"
+        "[Unit]\n"
+        "Description=PiPedal AirPlay receiver (shairport-sync)\n"
+        "Wants=avahi-daemon.service\n"
+        "After=network-online.target avahi-daemon.service pipedald.service\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        "User=pipedal_d\n"
+        "Group=pipedal_d\n"
+        // if the FIFO doesn't exist yet, the ALSA file plugin would create a regular
+        // file and grow it without bound; make sure the FIFO exists first.
+        "ExecStartPre=/bin/sh -c 'test -p " << configuration.fifoPath_ << " || mkfifo -m 660 " << configuration.fifoPath_ << "'\n"
+        "ExecStart=" << SHAIRPORT_BIN << " -o alsa -c " << AIRPLAY_SHAIRPORT_CONF_PATH << "\n"
+        "Restart=on-failure\n"
+        "RestartSec=5\n"
+        "LimitRTPRIO=10\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"));
+
+    silentSysExec("/usr/bin/systemctl daemon-reload");
+    // the stock shairport-sync service would advertise a second (broken) AirPlay
+    // endpoint pointing at the ALSA device that PiPedal owns.
+    silentSysExec("/usr/bin/systemctl disable --now shairport-sync.service");
+    silentSysExec("/usr/bin/systemctl enable pipedal-airplay.service");
+    int rc = sysExec("/usr/bin/systemctl restart pipedal-airplay.service");
+    if (rc != EXIT_SUCCESS)
+    {
+        throw std::runtime_error("Can't start the pipedal-airplay service.");
+    }
+    return true;
+}
+
 class AdminServer
 {
 private:
@@ -378,6 +499,21 @@ private:
                 {
                     result = setJackConfiguration(serverSettings) ? 0 : -1;
                 }
+            }
+            else if (command == "setAirplayConfiguration")
+            {
+                std::stringstream input(args);
+                AirplayServiceConfiguration airplayConfiguration;
+                try
+                {
+                    json_reader reader(input);
+                    reader.read(&airplayConfiguration);
+                }
+                catch (const std::exception &e)
+                {
+                    throw PiPedalArgumentException("Invalid arguments.");
+                }
+                result = setAirplayConfiguration(airplayConfiguration) ? 0 : -1;
             }
             else
             {

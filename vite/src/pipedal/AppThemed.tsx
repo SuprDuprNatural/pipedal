@@ -49,6 +49,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import ResizeResponsiveComponent from './ResizeResponsiveComponent';
 import Button from '@mui/material/Button';
 import PresetSelector from './PresetSelector';
+import AirplayControl from './AirplayControl';
 import SettingsDialog from './SettingsDialog';
 import AboutDialog from './AboutDialog';
 import BankDialog from './BankDialog';
@@ -826,6 +827,7 @@ export
                                             <PresetSelector />
                                         </div>
                                         <div style={{ flex: "2 2 30px" }} />
+                                        <AirplayControl />
                                         {this.state.canFullScreen &&
                                             <IconButtonEx
                                                 aria-label="maximise/minimise"
