@@ -21,6 +21,7 @@ export default class AirplaySettings {
     deserialize(input: any): AirplaySettings {
         this.enabled = input.enabled;
         this.volume = input.volume;
+        this.outputChannel = input.outputChannel ?? -1;
         return this;
     }
     clone(): AirplaySettings {
@@ -29,4 +30,7 @@ export default class AirplaySettings {
 
     enabled: boolean = false;
     volume: number = 0.7; // 0..1
+    // -1: PiPedal's main outputs; otherwise the left device channel of an
+    // output pair (0 = outputs 1/2, 2 = outputs 3/4, ...).
+    outputChannel: number = -1;
 }

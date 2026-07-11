@@ -2065,6 +2065,12 @@ export class PiPedalModel //implements PiPedalModel
     previewAirplayVolume(volume: number): void {
         this.webSocket?.send("previewAirplayVolume", volume);
     }
+    setAirplayOutputChannel(outputChannel: number): void {
+        let settings = this.airplaySettings.get().clone();
+        settings.outputChannel = outputChannel;
+        this.airplaySettings.set(settings);
+        this.webSocket?.send("setAirplaySettings", settings);
+    }
 
     loadPedalboardPlugin(itemId: number, selectedUri: string): number {
         let pedalboard = this.pedalboard.get();

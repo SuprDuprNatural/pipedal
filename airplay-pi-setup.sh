@@ -70,8 +70,16 @@ for b in pipedald pipedaladmind; do
     sudo cp src/$b /usr/sbin/$b
 done
 
-# ---- 5. web UI (only if a freshly built dist was copied over) ---------------
-if [ -d /tmp/react-dist ]; then
+# ---- 5. web UI (from a dist directory, tarball, or transferred chunks) ------
+if [ -d /tmp/rchunks ] && [ ! -f /tmp/react-dist.tgz ]; then
+    cat /tmp/rchunks/rchunk_* > /tmp/react.b64
+    base64 -d /tmp/react.b64 > /tmp/react-dist.tgz
+fi
+if [ -f /tmp/react-dist.tgz ]; then
+    sudo rm -rf /etc/pipedal/react/*
+    sudo tar xzf /tmp/react-dist.tgz -C /etc/pipedal/react
+    echo "web UI deployed."
+elif [ -d /tmp/react-dist ]; then
     sudo rm -rf /etc/pipedal/react/*
     sudo cp -r /tmp/react-dist/* /etc/pipedal/react/
     echo "web UI deployed."

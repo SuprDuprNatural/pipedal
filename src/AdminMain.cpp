@@ -276,6 +276,11 @@ static void writeFileOrThrow(const std::filesystem::path &path, const std::strin
 
 bool setAirplayConfiguration(const AirplayServiceConfiguration &configuration)
 {
+    // remove the ALSA device configuration written by earlier versions; the
+    // pipe backend writes straight to the FIFO and needs no ALSA plumbing.
+    std::error_code ignoredError;
+    std::filesystem::remove(AIRPLAY_ALSA_CONF_PATH, ignoredError);
+
     if (!configuration.enabled_)
     {
         silentSysExec("/usr/bin/systemctl disable --now pipedal-airplay.service");
@@ -287,38 +292,19 @@ bool setAirplayConfiguration(const AirplayServiceConfiguration &configuration)
             "shairport-sync is not installed. Run 'sudo apt install shairport-sync', then try again.");
     }
 
-    // ALSA device that converts whatever shairport-sync produces (44100 S16_LE)
-    // to the PiPedal device sample rate, and writes raw PCM to the FIFO that
-    // pipedald mixes into its main output.
-    writeFileOrThrow(AIRPLAY_ALSA_CONF_PATH, SS(
-        "# Written by pipedaladmind. Do not edit; changes will be overwritten.\n"
-        "pcm.pipedal_airplay_fifo {\n"
-        "    type file\n"
-        "    file \"" << configuration.fifoPath_ << "\"\n"
-        "    format \"raw\"\n"
-        "    slave {\n"
-        "        pcm \"null\"\n"
-        "    }\n"
-        "}\n"
-        "pcm.pipedal_airplay {\n"
-        "    type plug\n"
-        "    slave {\n"
-        "        pcm \"pipedal_airplay_fifo\"\n"
-        "        format S16_LE\n"
-        "        rate " << configuration.sampleRate_ << "\n"
-        "        channels 2\n"
-        "    }\n"
-        "}\n"));
-
-    // NOTE: compatible with shairport-sync 3.3.x (Debian bookworm); 3.3.x exits on
-    // unrecognized config options, so the backend is selected with -o alsa instead.
+    // The pipe backend writes raw 44100Hz S16_LE stereo to the FIFO; pipedald
+    // resamples to the device rate if necessary. (The alsa backend can't be
+    // pointed at a FIFO-backed virtual device: its sync engine needs real
+    // device timing.) NOTE: compatible with shairport-sync 3.3.x (Debian
+    // bookworm); 3.3.x exits on unrecognized config options, so the backend is
+    // selected with -o pipe instead of a config setting.
     writeFileOrThrow(AIRPLAY_SHAIRPORT_CONF_PATH, SS(
         "// Written by pipedaladmind. Do not edit; changes will be overwritten.\n"
         "general = {\n"
         "  name = \"" << sanitizeAirplayName(configuration.name_) << "\";\n"
         "};\n"
-        "alsa = {\n"
-        "  output_device = \"pipedal_airplay\";\n"
+        "pipe = {\n"
+        "  name = \"" << configuration.fifoPath_ << "\";\n"
         "};\n"
         "sessioncontrol = {\n"
         "  session_timeout = 20;\n"
@@ -338,7 +324,7 @@ bool setAirplayConfiguration(const AirplayServiceConfiguration &configuration)
         // if the FIFO doesn't exist yet, the ALSA file plugin would create a regular
         // file and grow it without bound; make sure the FIFO exists first.
         "ExecStartPre=/bin/sh -c 'test -p " << configuration.fifoPath_ << " || mkfifo -m 660 " << configuration.fifoPath_ << "'\n"
-        "ExecStart=" << SHAIRPORT_BIN << " -o alsa -c " << AIRPLAY_SHAIRPORT_CONF_PATH << "\n"
+        "ExecStart=" << SHAIRPORT_BIN << " -o pipe -c " << AIRPLAY_SHAIRPORT_CONF_PATH << "\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "LimitRTPRIO=10\n"

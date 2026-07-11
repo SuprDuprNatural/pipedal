@@ -53,6 +53,17 @@ AirplayInputStream::AirplayInputStream(const fs::path &fifoPath, uint32_t sample
     mixBuffer.resize(MIX_CHUNK_FRAMES * 2);
     readBuffer.resize(READ_BYTES);
     convertBuffer.resize(READ_BYTES / sizeof(int16_t) + 2);
+
+    resampleActive = sampleRate != SOURCE_SAMPLE_RATE;
+    if (resampleActive)
+    {
+        resampleRatio = (double)SOURCE_SAMPLE_RATE / (double)sampleRate;
+        size_t maxInputFrames = convertBuffer.size() / 2 + 8;
+        resampleBuffer.resize(maxInputFrames * 2 + 8);
+        size_t maxOutputFrames = (size_t)(maxInputFrames / resampleRatio) + 8;
+        resampleOutBuffer.resize(maxOutputFrames * 2);
+    }
+    ResetReaderState();
 }
 
 AirplayInputStream::~AirplayInputStream()
@@ -65,6 +76,19 @@ void AirplayInputStream::SetVolume(float volume)
     volume = std::clamp(volume, 0.0f, 1.0f);
     // square-law taper so the slider feels roughly linear in loudness.
     targetGain = volume * volume;
+}
+
+void AirplayInputStream::ResetReaderState()
+{
+    carryBytes = 0;
+    if (resampleActive)
+    {
+        // seed with one frame of silence so the interpolator has left history.
+        resampleBuffer[0] = 0;
+        resampleBuffer[1] = 0;
+        resampleFrames = 1;
+        resamplePosition = 1.0;
+    }
 }
 
 void AirplayInputStream::Start()
@@ -84,10 +108,13 @@ void AirplayInputStream::Start()
     this->cancelRead = cancelPipe[0];
     this->cancelWrite = cancelPipe[1];
 
-    carryBytes = 0;
+    ResetReaderState();
     dropping = false;
+    sessionActive = false;
     this->thread = std::make_unique<std::thread>([this]() { ThreadProc(); });
     streamRunning = true;
+    Lv2Log::info(SS("AirPlay input stream listening on " << fifoPath << " (" << sampleRate << " Hz"
+                    << (resampleActive ? ", resampling from 44100 Hz)" : ")")));
 }
 
 void AirplayInputStream::Stop()
@@ -146,8 +173,77 @@ void AirplayInputStream::CloseFifo()
     }
 }
 
+void AirplayInputStream::PushToRing(const float *samples, size_t nSamples)
+{
+    if (nSamples == 0)
+    {
+        return;
+    }
+    // bound latency: if the ring buffer backs up (clock drift over a very long
+    // session, or audio stopped), drop the newest audio instead of buffering it.
+    bool dropNow = ringBuffer.readSpace() > highWaterBytes;
+    if (!dropNow)
+    {
+        dropNow = !ringBuffer.write(nSamples * sizeof(float), (uint8_t *)samples);
+    }
+    if (dropNow != dropping)
+    {
+        dropping = dropNow;
+        if (dropping)
+        {
+            Lv2Log::info("AirPlay input: buffer full. Dropping audio.");
+        }
+    }
+}
+
+// Catmull-Rom cubic interpolation of the 44100Hz stream to the device rate.
+void AirplayInputStream::ResampleAndPush(const float *samples, size_t nFrames)
+{
+    std::memcpy(resampleBuffer.data() + resampleFrames * 2, samples, nFrames * 2 * sizeof(float));
+    resampleFrames += nFrames;
+
+    size_t outSamples = 0;
+    while (true)
+    {
+        size_t base = (size_t)resamplePosition;
+        if (base + 2 >= resampleFrames)
+        {
+            break; // need more input for the 4-point window.
+        }
+        float t = (float)(resamplePosition - (double)base);
+        const float *p = resampleBuffer.data() + (base - 1) * 2;
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            float p0 = p[channel];
+            float p1 = p[channel + 2];
+            float p2 = p[channel + 4];
+            float p3 = p[channel + 6];
+            resampleOutBuffer[outSamples + channel] =
+                0.5f * ((2.0f * p1) +
+                        (-p0 + p2) * t +
+                        (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t * t +
+                        (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t * t * t);
+        }
+        outSamples += 2;
+        resamplePosition += resampleRatio;
+    }
+    PushToRing(resampleOutBuffer.data(), outSamples);
+
+    // keep one frame of history to the left of the read position.
+    size_t keepFrom = std::min((size_t)resamplePosition - 1, resampleFrames - 1);
+    size_t keepFrames = resampleFrames - keepFrom;
+    std::memmove(resampleBuffer.data(), resampleBuffer.data() + keepFrom * 2, keepFrames * 2 * sizeof(float));
+    resampleFrames = keepFrames;
+    resamplePosition -= (double)keepFrom;
+}
+
 void AirplayInputStream::PushSamples(const uint8_t *data, size_t length)
 {
+    if (!sessionActive)
+    {
+        sessionActive = true;
+        Lv2Log::info("AirPlay input: stream started.");
+    }
     // FIFO reads aren't necessarily frame-aligned; carry partial frames forward.
     uint8_t aligned[READ_BYTES + sizeof(carryBuffer)];
     size_t totalBytes = carryBytes + length;
@@ -163,27 +259,20 @@ void AirplayInputStream::PushSamples(const uint8_t *data, size_t length)
         return;
     }
 
-    // bound latency: if the ring buffer backs up (clock drift over a very long
-    // session, or audio stopped), drop the newest audio instead of buffering it.
     size_t nSamples = wholeBytes / sizeof(int16_t);
-    bool dropNow = ringBuffer.readSpace() > highWaterBytes;
-    if (!dropNow)
+    const int16_t *sourceSamples = reinterpret_cast<const int16_t *>(aligned);
+    constexpr float scale = 1.0f / 32768.0f;
+    for (size_t i = 0; i < nSamples; ++i)
     {
-        const int16_t *sourceSamples = reinterpret_cast<const int16_t *>(aligned);
-        constexpr float scale = 1.0f / 32768.0f;
-        for (size_t i = 0; i < nSamples; ++i)
-        {
-            convertBuffer[i] = sourceSamples[i] * scale;
-        }
-        dropNow = !ringBuffer.write(nSamples * sizeof(float), (uint8_t *)convertBuffer.data());
+        convertBuffer[i] = sourceSamples[i] * scale;
     }
-    if (dropNow != dropping)
+    if (resampleActive)
     {
-        dropping = dropNow;
-        if (dropping)
-        {
-            Lv2Log::info("AirPlay input: buffer full. Dropping audio.");
-        }
+        ResampleAndPush(convertBuffer.data(), nSamples / 2);
+    }
+    else
+    {
+        PushToRing(convertBuffer.data(), nSamples);
     }
 }
 
@@ -239,7 +328,12 @@ void AirplayInputStream::ThreadProc()
                 // No writer connected (no active AirPlay session). The FIFO read
                 // end stays valid; wait a while (or until cancelled) before
                 // polling again so we don't spin on POLLHUP.
-                carryBytes = 0;
+                if (sessionActive)
+                {
+                    sessionActive = false;
+                    Lv2Log::info("AirPlay input: stream ended.");
+                }
+                ResetReaderState();
                 struct pollfd cancelPollFd;
                 cancelPollFd.fd = cancelRead;
                 cancelPollFd.events = POLLIN;
@@ -273,6 +367,17 @@ void AirplayInputStream::DiscardRing()
 
 void AirplayInputStream::MixOutput(std::vector<float *> &outputBuffers, size_t nFrames)
 {
+    float *outputs[2];
+    size_t nOutputs = std::min(outputBuffers.size(), (size_t)2);
+    for (size_t i = 0; i < nOutputs; ++i)
+    {
+        outputs[i] = outputBuffers[i];
+    }
+    MixOutput(outputs, nOutputs, nFrames);
+}
+
+void AirplayInputStream::MixOutput(float **outputBuffers, size_t nOutputs, size_t nFrames)
+{
     if (!streamRunning.load(std::memory_order_relaxed))
     {
         // keep the ring buffer drained so no stale audio plays on re-enable.
@@ -281,7 +386,7 @@ void AirplayInputStream::MixOutput(std::vector<float *> &outputBuffers, size_t n
         DiscardRing();
         return;
     }
-    if (outputBuffers.size() == 0)
+    if (nOutputs == 0 || outputBuffers[0] == nullptr)
     {
         return;
     }
@@ -301,7 +406,7 @@ void AirplayInputStream::MixOutput(std::vector<float *> &outputBuffers, size_t n
     }
 
     float *left = outputBuffers[0];
-    float *right = outputBuffers.size() >= 2 ? outputBuffers[1] : nullptr;
+    float *right = nOutputs >= 2 ? outputBuffers[1] : nullptr;
     float target = targetGain.load(std::memory_order_relaxed);
     float gain = currentGain;
     const float coefficient = gainSmoothingCoefficient;

@@ -41,6 +41,7 @@ import SelectMidiChannelsDialog from './SelectMidiChannelsDialog';
 import SelectHoverBackground from './SelectHoverBackground';
 import JackServerSettings from './JackServerSettings';
 import AudioDeviceDialog from './AudioDeviceDialog';
+import AirplayOutputSelect from './AirplayOutputSelect';
 import JackHostStatus from './JackHostStatus';
 import WifiConfigSettings from './WifiConfigSettings';
 import WifiDirectConfigSettings from './WifiDirectConfigSettings';
@@ -736,13 +737,15 @@ const SettingsDialog = withStyles(
                                     <SelectHoverBackground selected={false} showHover={true} />
                                     <div style={{ width: "100%" }}>
                                         <Typography display="block" variant="body2" noWrap>Channel Routing</Typography>
-                                        <Typography display="block" variant="caption" 
+                                        <Typography display="block" variant="caption"
                                         color={
                                             this.state.channelRouterSettings?.isValid(this.state.jackConfiguration) ?? false
                                              ?  "textSecondary": "error"} noWrap>{
                                             this.state.channelRouterSettings?.getDescription(this.state.jackConfiguration)??""}</Typography>
                                     </div>
                                 </ButtonBase>
+
+                                <AirplayOutputSelect className={classes.setting} />
 
 
                                 {/* Old Input and Output selection 

@@ -1828,6 +1828,8 @@ namespace pipedal
                         mixOp(framesRead);
                     }
 
+                    this->driverHost->OnMixDeviceOutputs(framesRead);
+
                     // final format conversion.
                     (this->*copyOutputFn)(framesRead);
 

@@ -246,6 +246,8 @@ namespace pipedal
         virtual void SetOutputVolume(float value) = 0;
         virtual void SetAirplayStreamEnabled(bool enabled) = 0;
         virtual void SetAirplayVolume(float volume) = 0;
+        // -1: PiPedal's main outputs; >= 0: left channel of a device output pair.
+        virtual void SetAirplayOutputChannel(int32_t leftChannel) = 0;
         virtual void SetPluginPreset(uint64_t instanceId, const std::vector<ControlValue> &values) = 0;
         virtual void SetBypass(uint64_t instanceId, bool enabled) = 0;
 

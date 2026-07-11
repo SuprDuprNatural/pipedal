@@ -466,6 +466,7 @@ void PiPedalModel::Load()
         // need to bring up the FIFO reader and set the stream gain.
         AirplaySettings airplaySettings = storage.GetAirplaySettings();
         audioHost->SetAirplayVolume(airplaySettings.volume_);
+        audioHost->SetAirplayOutputChannel(airplaySettings.outputChannel_);
         audioHost->SetAirplayStreamEnabled(airplaySettings.enabled_);
     }
 
@@ -1690,6 +1691,7 @@ void PiPedalModel::SetAirplaySettings(const AirplaySettings &airplaySettings)
     }
     storage.SetAirplaySettings(airplaySettings);
     audioHost->SetAirplayVolume(airplaySettings.volume_);
+    audioHost->SetAirplayOutputChannel(airplaySettings.outputChannel_);
     audioHost->SetAirplayStreamEnabled(airplaySettings.enabled_);
 
     for (auto &subscriber : t)
@@ -2319,20 +2321,6 @@ void PiPedalModel::SetJackServerSettings(const JackServerSettings &jackServerSet
 
     guard.unlock();
     RestartAudio();
-
-    // keep the AirPlay service's ALSA config in sync with the (possibly changed) sample rate.
-    try
-    {
-        AirplaySettings airplaySettings = GetAirplaySettings();
-        if (airplaySettings.enabled_)
-        {
-            UpdateAirplayServiceConfiguration(airplaySettings);
-        }
-    }
-    catch (const std::exception &e)
-    {
-        Lv2Log::error(SS("Can't reconfigure the AirPlay service. " << e.what()));
-    }
 
 #endif
 #if JACK_HOST

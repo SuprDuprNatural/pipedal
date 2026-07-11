@@ -43,6 +43,11 @@ namespace pipedal {
         virtual void OnProcess(size_t nFrames) = 0;
         virtual bool OnRealtimeUpdateDeviceVus(size_t nFrames) = 0;
 
+        // Called after the channel router has mixed main/aux outputs into the
+        // device output buffers, but before format conversion — the host may mix
+        // additional audio (e.g. the AirPlay stream) directly into device channels.
+        virtual void OnMixDeviceOutputs(size_t nFrames) {}
+
         virtual void OnUnderrun() = 0;
         virtual void OnAlsaDriverStopped() = 0;
         virtual void OnAudioTerminated() = 0;

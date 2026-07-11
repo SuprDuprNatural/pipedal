@@ -35,6 +35,10 @@ namespace pipedal
     public:
         bool enabled_ = false;
         float volume_ = 0.7f; // 0..1
+        // Where the stream goes: -1 = PiPedal's main outputs (post-pedalboard);
+        // otherwise the left device channel of an output pair (0 = outputs 1/2,
+        // 2 = outputs 3/4, ...).
+        int32_t outputChannel_ = -1;
 
         DECLARE_JSON_MAP(AirplaySettings);
     };

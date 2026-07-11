@@ -25,6 +25,7 @@ using namespace pipedal;
 JSON_MAP_BEGIN(AirplaySettings)
 JSON_MAP_REFERENCE(AirplaySettings, enabled)
 JSON_MAP_REFERENCE(AirplaySettings, volume)
+JSON_MAP_REFERENCE(AirplaySettings, outputChannel)
 JSON_MAP_END()
 
 JSON_MAP_BEGIN(AirplayServiceConfiguration)

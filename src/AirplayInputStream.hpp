@@ -32,15 +32,17 @@ namespace pipedal
 {
     // Streams AirPlay audio from shairport-sync into the realtime audio thread.
     //
-    // shairport-sync plays into an ALSA plug device (written by pipedaladmind)
-    // that converts to the current device sample rate and writes raw S16_LE
-    // stereo PCM to a named pipe. A reader thread converts the PCM to float
-    // and buffers it in a ring buffer; the realtime thread pulls it out of the
-    // ring buffer and adds it to the main output buffers.
+    // shairport-sync's pipe backend writes raw 44100Hz S16_LE stereo PCM to a
+    // named pipe. A reader thread converts the PCM to float — resampling to the
+    // device sample rate when it isn't 44100 — and buffers it in a ring buffer;
+    // the realtime thread pulls it out of the ring buffer and adds it to output
+    // buffers with a smoothed gain.
     class AirplayInputStream
     {
     public:
         using ptr = std::shared_ptr<AirplayInputStream>;
+
+        static constexpr uint32_t SOURCE_SAMPLE_RATE = 44100; // AirPlay stream rate.
 
         AirplayInputStream(const std::filesystem::path &fifoPath, uint32_t sampleRate);
         ~AirplayInputStream();
@@ -55,6 +57,7 @@ namespace pipedal
 
         // Realtime thread only: add buffered stream audio to the output buffers.
         void MixOutput(std::vector<float *> &outputBuffers, size_t nFrames);
+        void MixOutput(float **outputBuffers, size_t nOutputs, size_t nFrames);
 
     private:
         static constexpr size_t FRAME_BYTES = 2 * sizeof(float); // stereo float in the ring buffer.
@@ -66,6 +69,9 @@ namespace pipedal
         void OpenFifo();
         void CloseFifo();
         void PushSamples(const uint8_t *data, size_t length);
+        void PushToRing(const float *samples, size_t nSamples);
+        void ResampleAndPush(const float *samples, size_t nFrames);
+        void ResetReaderState();
         void DiscardRing();
 
         std::filesystem::path fifoPath;
@@ -86,10 +92,19 @@ namespace pipedal
         // reader-thread state.
         size_t highWaterBytes = 0;
         bool dropping = false;
+        bool sessionActive = false;
         std::vector<uint8_t> readBuffer;
         std::vector<float> convertBuffer;
         size_t carryBytes = 0;
         uint8_t carryBuffer[4];
+
+        // reader-thread resampler state (only used when sampleRate != 44100).
+        bool resampleActive = false;
+        double resampleRatio = 1;        // source frames per output frame.
+        double resamplePosition = 0;     // fractional frame position in resampleBuffer.
+        size_t resampleFrames = 0;       // valid frames in resampleBuffer.
+        std::vector<float> resampleBuffer; // interleaved stereo working buffer.
+        std::vector<float> resampleOutBuffer;
 
         std::unique_ptr<std::thread> thread;
         int fd = -1;

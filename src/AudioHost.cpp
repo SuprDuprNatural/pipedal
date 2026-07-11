@@ -487,6 +487,8 @@ private:
     AirplayInputStream::ptr airplayInput;
     std::atomic<bool> airplayEnabled = false;
     std::atomic<float> airplayVolume = 0.7f;
+    std::atomic<int32_t> airplayOutputChannel = -1; // -1: main outputs; else left device channel.
+    int32_t airplayLastDeviceChannel = -1;          // realtime thread only.
 
     std::recursive_mutex mutex;
     int64_t overrunGracePeriodSamples = 0;
@@ -1355,6 +1357,69 @@ private:
             }
         }
     }
+    bool IsRoutedDeviceOutputChannel(int32_t channel) const
+    {
+        for (auto routedChannel : channelSelection.mainOutputChannels())
+        {
+            if (routedChannel == channel)
+                return true;
+        }
+        for (auto routedChannel : channelSelection.auxOutputChannels())
+        {
+            if (routedChannel == channel)
+                return true;
+        }
+        return false;
+    }
+
+    void ZeroUnroutedDeviceOutputChannel(int32_t channel, size_t nFrames)
+    {
+        auto &deviceBuffers = audioDriver->DeviceOutputBuffers();
+        if (channel < 0 || (size_t)channel >= deviceBuffers.size())
+            return;
+        if (IsRoutedDeviceOutputChannel(channel))
+            return; // the channel router rewrites this channel every cycle.
+        float *buffer = deviceBuffers[channel];
+        for (size_t i = 0; i < nFrames; ++i)
+        {
+            buffer[i] = 0;
+        }
+    }
+
+    void OnMixDeviceOutputs(size_t nFrames) override
+    {
+        int32_t channel = airplayOutputChannel.load(std::memory_order_relaxed);
+        if (airplayLastDeviceChannel != channel)
+        {
+            // don't leave the last mixed buffer repeating on the old channels.
+            ZeroUnroutedDeviceOutputChannel(airplayLastDeviceChannel, nFrames);
+            ZeroUnroutedDeviceOutputChannel(airplayLastDeviceChannel + 1, nFrames);
+            airplayLastDeviceChannel = channel;
+        }
+        if (channel < 0 || !airplayInput)
+        {
+            return;
+        }
+        auto &deviceBuffers = audioDriver->DeviceOutputBuffers();
+        if ((size_t)channel >= deviceBuffers.size())
+        {
+            return;
+        }
+        // channels the router doesn't drive hold last cycle's data; clear them
+        // before mixing so the stream is written fresh each cycle.
+        ZeroUnroutedDeviceOutputChannel(channel, nFrames);
+        float *outputs[2];
+        size_t nOutputs = 1;
+        outputs[0] = deviceBuffers[channel];
+        if ((size_t)(channel + 1) < deviceBuffers.size())
+        {
+            ZeroUnroutedDeviceOutputChannel(channel + 1, nFrames);
+            outputs[1] = deviceBuffers[channel + 1];
+            nOutputs = 2;
+        }
+        airplayInput->MixOutput(outputs, nOutputs, nFrames);
+    }
+
     bool OnRealtimeUpdateDeviceVus(size_t nFrames) override
     {
         // all lv2pedalboards processed, and all channels downmixed.
@@ -1409,7 +1474,7 @@ private:
             }
             ProcessLv2Pedalboard(nframes);
 
-            if (airplayInput)
+            if (airplayInput && airplayOutputChannel.load(std::memory_order_relaxed) < 0)
             {
                 airplayInput->MixOutput(audioDriver->MainOutputBuffers(), nframes);
             }
@@ -2073,6 +2138,11 @@ public:
         {
             airplayInput->SetVolume(volume);
         }
+    }
+
+    virtual void SetAirplayOutputChannel(int32_t leftChannel)
+    {
+        this->airplayOutputChannel = leftChannel;
     }
 
     std::vector<IndexedSnapshot *> pendingSnapshots;
