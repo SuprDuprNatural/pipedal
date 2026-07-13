@@ -1,5 +1,6 @@
-// Custom control views for Supr pedals: a big gain-reduction meter for the
-// Supr Compressor, and a stereo needle VU for Supr VU.
+// Custom control views for Supr pedals: a big gain-reduction meter for
+// SuprCompressor, a stereo needle VU for SuprVU, and live filter-response
+// plots for SuprOctavePlus and SuprEnvelopeFilter.
 //
 // MIT license, (c) 2026 SuprDuprNatural.
 
@@ -13,10 +14,13 @@ import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
 import { PedalboardItem } from './Pedalboard';
 import PluginControlView, { ICustomizationHost, ControlGroup, ControlViewCustomization } from './PluginControlView';
 import SuprMeterControl, { MeterTick } from './SuprMeterControl';
+import SuprResponsePlot, { ResponseVariant } from './SuprResponsePlot';
 import ToobSpectrumResponseView from './ToobSpectrumResponseView';
 
 const SUPR_COMPRESSOR_URI = "https://suprduprnatural.github.io/supr-pedals/compressor";
 const SUPR_VU_URI = "https://suprduprnatural.github.io/supr-pedals/vu-meter";
+const SUPR_OCTAVE_PLUS_URI = "https://suprduprnatural.github.io/supr-pedals/octave-plus";
+const SUPR_ENV_FILTER_URI = "https://suprduprnatural.github.io/supr-pedals/envelope-filter";
 
 const styles = (theme: Theme) => createStyles({});
 
@@ -319,6 +323,67 @@ const SuprVuView =
         styles
     );
 
+// A view that puts a live filter-response plot above the standard grouped
+// controls (SuprOctavePlus and SuprEnvelopeFilter).
+function makeResponsePlotView(variant: ResponseVariant) {
+    return withStyles(
+        class extends React.Component<SuprViewProps, SuprViewState>
+            implements ControlViewCustomization {
+            model: PiPedalModel;
+            customizationId: number = 1;
+
+            fullScreen() {
+                return false;
+            }
+
+            constructor(props: SuprViewProps) {
+                super(props);
+                this.model = PiPedalModelFactory.getInstance();
+                this.state = {};
+            }
+
+            currentControlValues(): { [symbol: string]: number } {
+                let values: { [symbol: string]: number } = {};
+                try {
+                    const item = this.model.pedalboard.get().getItem(this.props.instanceId);
+                    for (let cv of item.controlValues) {
+                        values[cv.key] = cv.value;
+                    }
+                } catch (e) {
+                    // start/end/missing items: plot falls back to defaults
+                }
+                return values;
+            }
+
+            modifyControls(host: ICustomizationHost,
+                controls: (React.ReactNode | ControlGroup)[]): (React.ReactNode | ControlGroup)[] {
+                const plot = (
+                    <SuprResponsePlot key="supr_response_plot"
+                        instanceId={this.props.instanceId}
+                        variant={variant}
+                        controls={this.currentControlValues()}
+                        tallControl={true} />);
+                return [plot, ...controls];
+            }
+
+            render() {
+                return (<PluginControlView
+                    instanceId={this.props.instanceId}
+                    item={this.props.item}
+                    customization={this}
+                    customizationId={this.customizationId}
+                    showModGui={false}
+                    onSetShowModGui={(instanceId: number, showModGui: boolean) => { }}
+                />);
+            }
+        },
+        styles
+    );
+}
+
+const SuprOctavePlusView = makeResponsePlotView("octaveplus");
+const SuprEnvFilterView = makeResponsePlotView("envfilter");
+
 export class SuprCompressorViewFactory implements IControlViewFactory {
     uri: string = SUPR_COMPRESSOR_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
@@ -330,6 +395,20 @@ export class SuprVuViewFactory implements IControlViewFactory {
     uri: string = SUPR_VU_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
         return (<SuprVuView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+export class SuprOctavePlusViewFactory implements IControlViewFactory {
+    uri: string = SUPR_OCTAVE_PLUS_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprOctavePlusView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+export class SuprEnvFilterViewFactory implements IControlViewFactory {
+    uri: string = SUPR_ENV_FILTER_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprEnvFilterView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
     }
 }
 
