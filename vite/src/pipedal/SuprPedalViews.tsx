@@ -14,11 +14,13 @@ import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
 import { PedalboardItem } from './Pedalboard';
 import PluginControlView, { ICustomizationHost, ControlGroup, ControlViewCustomization } from './PluginControlView';
 import SuprMeterControl, { MeterTick } from './SuprMeterControl';
-import SuprResponsePlot, { ResponseVariant } from './SuprResponsePlot';
+import SuprResponsePlot from './SuprResponsePlot';
+import { PanelColumn, SuprPanelUnit, mapControlNodes } from './SuprPanel';
 import ToobSpectrumResponseView from './ToobSpectrumResponseView';
 
 const SUPR_COMPRESSOR_URI = "https://suprduprnatural.github.io/supr-pedals/compressor";
 const SUPR_VU_URI = "https://suprduprnatural.github.io/supr-pedals/vu-meter";
+const SUPR_OCTAVE_URI = "https://suprduprnatural.github.io/supr-pedals/octave";
 const SUPR_OCTAVE_PLUS_URI = "https://suprduprnatural.github.io/supr-pedals/octave-plus";
 const SUPR_ENV_FILTER_URI = "https://suprduprnatural.github.io/supr-pedals/envelope-filter";
 
@@ -220,112 +222,79 @@ const SuprSpectrumView =
         styles
     );
 
-const SuprCompressorView =
-    withStyles(
-        class extends React.Component<SuprViewProps, SuprViewState>
-            implements ControlViewCustomization {
-            model: PiPedalModel;
-            customizationId: number = 1;
+// The compressor face: big GR meter on the left, the Compression section on
+// the right with the Output section nestled directly beneath it — like the
+// front panel of a real studio compressor. (The gr port is pprops:notOnGUI;
+// the meter displays it instead.)
+const SuprCompressorView = makePanelView((ctx) => [
+    {
+        grow: 0, sections: [{
+            rows: [[(
+                <SuprMeterControl key="supr_gr_meter"
+                    instanceId={ctx.instanceId}
+                    needles={[{ port: "gr", color: "#b03030" }]}
+                    ticks={GR_TICKS}
+                    minDb={-30} maxDb={0} gamma={2.4}
+                    label="GAIN REDUCTION"
+                    width={360} height={160} />
+            )]]
+        }]
+    },
+    {
+        sections: [
+            { label: "Compression", rows: [["threshold", "ratio", "attack", "release", "schpf"]] },
+            { label: "Output", rows: [["makeup", "blend"]] },
+        ]
+    },
+]);
 
-            fullScreen() {
-                return false;
-            }
+// A classic stereo pair: one VU face per channel, Calibration at the end.
+// (The four dB readout ports are pprops:notOnGUI; the needles show them.)
+const SuprVuView = makePanelView((ctx) => [
+    {
+        grow: 0, sections: [{
+            rows: [[(
+                <SuprMeterControl key="supr_vu_meter_l"
+                    instanceId={ctx.instanceId}
+                    needles={[{ port: "vu_l", color: "#b03030" }]}
+                    leds={[{ port: "peak_l", thresholdDb: -1, color: "#e33" }]}
+                    ticks={VU_TICKS}
+                    minDb={-20} maxDb={3} gamma={2.0}
+                    label="LEFT"
+                    width={300} height={140} />
+            )]]
+        }]
+    },
+    {
+        grow: 0, sections: [{
+            rows: [[(
+                <SuprMeterControl key="supr_vu_meter_r"
+                    instanceId={ctx.instanceId}
+                    needles={[{ port: "vu_r", color: "#b03030" }]}
+                    leds={[{ port: "peak_r", thresholdDb: -1, color: "#e33" }]}
+                    ticks={VU_TICKS}
+                    minDb={-20} maxDb={3} gamma={2.0}
+                    label="RIGHT"
+                    width={300} height={140} />
+            )]]
+        }]
+    },
+    { sections: [{ rows: [["calibration"]] }] },
+]);
 
-            constructor(props: SuprViewProps) {
-                super(props);
-                this.model = PiPedalModelFactory.getInstance();
-                this.state = {};
-            }
+// ---------------------------------------------------------------------------
+// Panel-based views: one TooB-EQ-style console unit per pedal, built by
+// re-arranging the standard control nodes into nestled sections (SuprPanel).
+// ---------------------------------------------------------------------------
 
-            modifyControls(host: ICustomizationHost,
-                controls: (React.ReactNode | ControlGroup)[]): (React.ReactNode | ControlGroup)[] {
-                // the gr port is pprops:notOnGUI; the meter displays it instead
-                const meter = (
-                    <SuprMeterControl key="supr_gr_meter"
-                        instanceId={this.props.instanceId}
-                        needles={[{ port: "gr", color: "#b03030" }]}
-                        ticks={GR_TICKS}
-                        minDb={-30} maxDb={0} gamma={2.4}
-                        label="GAIN REDUCTION"
-                        width={360} height={160} tallControl={true} />);
-                return [meter, ...controls];
-            }
+interface PanelContext {
+    instanceId: number;
+    // current control values, for the response plots
+    controlValues: { [symbol: string]: number };
+}
+type PanelBuilder = (ctx: PanelContext) => PanelColumn[];
 
-            render() {
-                return (<PluginControlView
-                    instanceId={this.props.instanceId}
-                    item={this.props.item}
-                    customization={this}
-                    customizationId={this.customizationId}
-                    showModGui={false}
-                    onSetShowModGui={(instanceId: number, showModGui: boolean) => { }}
-                />);
-            }
-        },
-        styles
-    );
-
-const SuprVuView =
-    withStyles(
-        class extends React.Component<SuprViewProps, SuprViewState>
-            implements ControlViewCustomization {
-            model: PiPedalModel;
-            customizationId: number = 1;
-
-            fullScreen() {
-                return false;
-            }
-
-            constructor(props: SuprViewProps) {
-                super(props);
-                this.model = PiPedalModelFactory.getInstance();
-                this.state = {};
-            }
-
-            modifyControls(host: ICustomizationHost,
-                controls: (React.ReactNode | ControlGroup)[]): (React.ReactNode | ControlGroup)[] {
-                // a classic stereo pair: one VU face per channel
-                const meterL = (
-                    <SuprMeterControl key="supr_vu_meter_l"
-                        instanceId={this.props.instanceId}
-                        needles={[{ port: "vu_l", color: "#b03030" }]}
-                        leds={[{ port: "peak_l", thresholdDb: -1, color: "#e33" }]}
-                        ticks={VU_TICKS}
-                        minDb={-20} maxDb={3} gamma={2.0}
-                        label="LEFT"
-                        width={300} height={140} tallControl={true} />);
-                const meterR = (
-                    <SuprMeterControl key="supr_vu_meter_r"
-                        instanceId={this.props.instanceId}
-                        needles={[{ port: "vu_r", color: "#b03030" }]}
-                        leds={[{ port: "peak_r", thresholdDb: -1, color: "#e33" }]}
-                        ticks={VU_TICKS}
-                        minDb={-20} maxDb={3} gamma={2.0}
-                        label="RIGHT"
-                        width={300} height={140} tallControl={true} />);
-                // The four dB output readouts are pprops:notOnGUI, so `controls`
-                // holds only the visible input controls (the Calibration knob);
-                // show the meters, then that knob below them.
-                return [meterL, meterR, ...controls];
-            }
-
-            render() {
-                return (<PluginControlView
-                    instanceId={this.props.instanceId}
-                    item={this.props.item}
-                    customization={this}
-                    customizationId={this.customizationId}
-                    showModGui={false}
-                    onSetShowModGui={(instanceId: number, showModGui: boolean) => { }}
-                />);
-            }
-        },
-        styles
-    );
-
-// A view that puts a live filter-response plot above the standard grouped
-// controls (SuprOctavePlus and SuprEnvelopeFilter).
-function makeResponsePlotView(variant: ResponseVariant) {
+function makePanelView(builder: PanelBuilder) {
     return withStyles(
         class extends React.Component<SuprViewProps, SuprViewState>
             implements ControlViewCustomization {
@@ -350,20 +319,22 @@ function makeResponsePlotView(variant: ResponseVariant) {
                         values[cv.key] = cv.value;
                     }
                 } catch (e) {
-                    // start/end/missing items: plot falls back to defaults
+                    // start/end/missing items: plots fall back to defaults
                 }
                 return values;
             }
 
             modifyControls(host: ICustomizationHost,
                 controls: (React.ReactNode | ControlGroup)[]): (React.ReactNode | ControlGroup)[] {
-                const plot = (
-                    <SuprResponsePlot key="supr_response_plot"
-                        instanceId={this.props.instanceId}
-                        variant={variant}
-                        controls={this.currentControlValues()}
-                        tallControl={true} />);
-                return [plot, ...controls];
+                const nodes = mapControlNodes(this.model, this.props.item.uri, controls);
+                const columns = builder({
+                    instanceId: this.props.instanceId,
+                    controlValues: this.currentControlValues()
+                });
+                return [(
+                    <SuprPanelUnit key="supr_panel" columns={columns} nodes={nodes}
+                        tallControl={true} />
+                )];
             }
 
             render() {
@@ -381,8 +352,42 @@ function makeResponsePlotView(variant: ResponseVariant) {
     );
 }
 
-const SuprOctavePlusView = makeResponsePlotView("octaveplus");
-const SuprEnvFilterView = makeResponsePlotView("envfilter");
+const SuprOctaveView = makePanelView(() => [
+    { sections: [{ label: "Mix", rows: [["direct", "oct1", "oct2"]] }] },
+    { sections: [{ label: "Sub", rows: [["tone", "gate"]] }] },
+]);
+
+const SuprOctavePlusView = makePanelView((ctx) => [
+    {
+        grow: 0, sections: [{
+            rows: [[(
+                <SuprResponsePlot key="plot" instanceId={ctx.instanceId}
+                    variant="octaveplus" controls={ctx.controlValues} frameless />
+            )]]
+        }]
+    },
+    { sections: [{ label: "Octaves", rows: [["direct", "oct1", "oct2"], ["tone", "gate"]] }] },
+    { sections: [{ label: "Synth", rows: [["synth", "wave", "synthoct"], ["detune", "glide"]] }] },
+    { sections: [{ label: "Filter", rows: [["cutoff", "res", "envmod"], ["keytrack", "fattack", "fdecay"]] }] },
+    { sections: [{ label: "Envelope", rows: [["envmode", "attack", "decay"], ["sustain", "release"]] }] },
+]);
+
+const SuprEnvFilterView = makePanelView((ctx) => [
+    {
+        grow: 0, sections: [{
+            rows: [
+                [(
+                    <SuprResponsePlot key="plot" instanceId={ctx.instanceId}
+                        variant="envfilter" controls={ctx.controlValues} frameless />
+                )],
+                ["mode", "dir"]
+            ]
+        }]
+    },
+    { sections: [{ label: "Envelope", rows: [["sens"], ["attack", "release"]] }] },
+    { sections: [{ label: "Filter", rows: [["cutoff", "range"], ["res"]] }] },
+    { sections: [{ label: "Output", rows: [["blend"], ["level"]] }] },
+]);
 
 export class SuprCompressorViewFactory implements IControlViewFactory {
     uri: string = SUPR_COMPRESSOR_URI;
@@ -395,6 +400,13 @@ export class SuprVuViewFactory implements IControlViewFactory {
     uri: string = SUPR_VU_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
         return (<SuprVuView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+export class SuprOctaveViewFactory implements IControlViewFactory {
+    uri: string = SUPR_OCTAVE_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprOctaveView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
     }
 }
 

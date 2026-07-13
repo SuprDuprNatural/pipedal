@@ -32,6 +32,9 @@ interface SuprResponsePlotProps extends WithStyles<typeof styles> {
     controls: { [symbol: string]: number };
     // read by PluginControlView: opt out of the fixed-height control slot
     tallControl?: boolean;
+    // render just the plot screen, no module border/title (for use inside a
+    // SuprPanel section, which provides its own walls and label)
+    frameless?: boolean;
 }
 
 interface SuprResponsePlotState {
@@ -342,6 +345,25 @@ const SuprResponsePlot =
                     key = this.renderOctavePlus(elements, key, accent, second, textColor);
                 }
 
+                const screen = (
+                    <div style={{
+                        width: PLOT_W, height: PLOT_H, position: "relative",
+                        borderRadius: 4, overflow: "hidden",
+                        boxShadow: dark ?
+                            "5px 5px 6px rgba(0,0,0,0.8) inset" :
+                            "1px 5px 6px #888 inset",
+                        background: dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.02)"
+                    }}>
+                        <svg viewBox={`0 0 ${PLOT_W} ${PLOT_H}`} width={PLOT_W} height={PLOT_H}
+                            style={{ position: "absolute" }}>
+                            {elements}
+                        </svg>
+                    </div>);
+
+                if (this.props.frameless) {
+                    return screen;
+                }
+
                 // A module frame styled to match PluginControlView's portGroup
                 // boxes (border, radius, floating title chip), so the plot
                 // reads as one more section in the rack.
@@ -362,19 +384,7 @@ const SuprResponsePlot =
                         }}>
                             <Typography noWrap variant="caption">Response</Typography>
                         </div>
-                        <div style={{
-                            width: PLOT_W, height: PLOT_H, position: "relative",
-                            borderRadius: 4, overflow: "hidden",
-                            boxShadow: dark ?
-                                "5px 5px 6px rgba(0,0,0,0.8) inset" :
-                                "1px 5px 6px #888 inset",
-                            background: dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.02)"
-                        }}>
-                            <svg viewBox={`0 0 ${PLOT_W} ${PLOT_H}`} width={PLOT_W} height={PLOT_H}
-                                style={{ position: "absolute" }}>
-                                {elements}
-                            </svg>
-                        </div>
+                        {screen}
                     </div>);
             }
         },
