@@ -10,6 +10,10 @@ Testing/
 # Local development credentials (never commit).
 username.txt
 
+# Local working notes. Records this installation's host names, accounts and
+# build/backup paths, so it is kept out of the public repository.
+docs/GpioHardwareControlHandover.md
+
 # macOS Finder metadata.
 .DS_Store
 
