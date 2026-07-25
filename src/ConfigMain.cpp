@@ -77,6 +77,8 @@ namespace fs = std::filesystem;
 #define AUDIO_SERVICE_GROUP_NAME "audio"
 #define JACK_SERVICE_GROUP_NAME AUDIO_SERVICE_GROUP_NAME
 #define NETDEV_GROUP_NAME "netdev"
+#define GPIO_GROUP_NAME "gpio"
+#define I2C_GROUP_NAME "i2c"
 
 #define SYSTEMCTL_BIN "/usr/bin/systemctl"
 #define GROUPADD_BIN "/usr/sbin/groupadd"
@@ -1156,6 +1158,18 @@ void Install(const fs::path &programPrefix, const std::string endpointAddress)
         // add to netdev group
         sysExec(GROUPADD_BIN " -f " NETDEV_GROUP_NAME);
         sysExec(USERMOD_BIN " -a -G  " NETDEV_GROUP_NAME " " SERVICE_ACCOUNT_NAME);
+
+        // Raspberry Pi OS grants GPIO character-device access through this
+        // group. Do not create it on other distributions: their udev policy may
+        // use a different group or ACL mechanism.
+        if (getgrnam(GPIO_GROUP_NAME) != nullptr)
+        {
+            sysExec(USERMOD_BIN " -a -G  " GPIO_GROUP_NAME " " SERVICE_ACCOUNT_NAME);
+        }
+        if (getgrnam(I2C_GROUP_NAME) != nullptr)
+        {
+            sysExec(USERMOD_BIN " -a -G  " I2C_GROUP_NAME " " SERVICE_ACCOUNT_NAME);
+        }
 
         try
         {

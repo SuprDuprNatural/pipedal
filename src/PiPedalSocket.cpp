@@ -1967,6 +1967,42 @@ public:
     }
     REGISTER_MESSAGE_HANDLER(getSystemMidiBindings)
 
+    void handle_getGpioSettings(int replyTo, json_reader *pReader)
+    {
+        this->Reply(replyTo, "getGpioSettings", this->model.GetGpioSettings());
+    }
+    REGISTER_MESSAGE_HANDLER(getGpioSettings)
+
+    void handle_setGpioSettings(int replyTo, json_reader *pReader)
+    {
+        GpioSettings settings;
+        pReader->read(&settings);
+        this->model.SetGpioSettings(settings);
+        this->Reply(replyTo, "setGpioSettings", true);
+    }
+    REGISTER_MESSAGE_HANDLER(setGpioSettings)
+
+    void handle_getGpioCapabilities(int replyTo, json_reader *pReader)
+    {
+        this->Reply(replyTo, "getGpioCapabilities", this->model.GetGpioCapabilities());
+    }
+    REGISTER_MESSAGE_HANDLER(getGpioCapabilities)
+
+    void handle_getGpioInputStatuses(int replyTo, json_reader *pReader)
+    {
+        this->Reply(replyTo, "getGpioInputStatuses", this->model.GetGpioInputStatuses());
+    }
+    REGISTER_MESSAGE_HANDLER(getGpioInputStatuses)
+
+    void handle_setGpioBindings(int replyTo, json_reader *pReader)
+    {
+        std::vector<GpioBinding> bindings;
+        pReader->read(&bindings);
+        this->model.SetGpioBindings(clientId, bindings);
+        this->Reply(replyTo, "setGpioBindings", true);
+    }
+    REGISTER_MESSAGE_HANDLER(setGpioBindings)
+
     void handle_requestFileList(int replyTo, json_reader *pReader)
     {
         throw std::runtime_error("No longer implemented.");
@@ -2369,6 +2405,16 @@ private:
     virtual void OnSystemMidiBindingsChanged(const std::vector<MidiBinding> &bindings)
     {
         Send("onSystemMidiBindingsChanged", bindings);
+    }
+
+    virtual void OnGpioSettingsChanged(const GpioSettings &settings) override
+    {
+        Send("onGpioSettingsChanged", settings);
+    }
+
+    virtual void OnGpioInputStatusChanged(const GpioInputStatus &status) override
+    {
+        Send("onGpioInputStatusChanged", status);
     }
 
     virtual void OnFavoritesChanged(const std::map<std::string, bool> &favorites)

@@ -68,6 +68,8 @@ import SnapshotDialog from './SnapshotDialog';
 import { css } from '@emotion/react';
 import { setDefaultModGuiPreference } from './ModGuiHost';
 import PluginNameDialog from './PluginNameDialog';
+import DeveloperBoardOutlinedIcon from '@mui/icons-material/DeveloperBoardOutlined';
+import GpioBindingsView from './GpioBindingsView';
 
 
 const RACK_VIEW_PREFERENCE_KEY = "pipedal.rackView";
@@ -156,6 +158,7 @@ interface MainState {
     displayNameDialogOpen: boolean;
     showModUi: boolean;
     rackView: boolean;
+    gpioView: boolean;
 
 
 
@@ -205,7 +208,8 @@ export const MainPage =
                         showMidiBindingsDialog: false,
                         screenHeight: this.windowSize.height,
                         showModUi: false,
-                        rackView: getRackViewPreference()
+                        rackView: getRackViewPreference(),
+                        gpioView: false
 
 
                     };
@@ -225,7 +229,10 @@ export const MainPage =
                 handleRackViewToggle() {
                     let newValue = !this.state.rackView;
                     setRackViewPreference(newValue);
-                    this.setState({ rackView: newValue });
+                    this.setState({ rackView: newValue, gpioView: false });
+                }
+                handleGpioViewToggle() {
+                    this.setState({ gpioView: !this.state.gpioView, rackView: false });
                 }
 
                 renderRackItem(item: PedalboardItem): React.ReactNode {
@@ -805,6 +812,15 @@ export const MainPage =
 
                                     </div>
                                     <div style={{ flex: "0 0 auto" }}>
+                                        {this.props.enableStructureEditing && (
+                                            <IconButtonEx
+                                                tooltip={this.state.gpioView ? "Show effect controls" : "Hardware input mappings"}
+                                                onClick={() => this.handleGpioViewToggle()}
+                                                color={this.state.gpioView ? "primary" : "default"}
+                                                size="large">
+                                                <DeveloperBoardOutlinedIcon style={{ height: 24, width: 24, opacity: this.state.gpioView ? 1 : 0.6 }} />
+                                            </IconButtonEx>
+                                        )}
                                         <IconButtonEx
                                             tooltip={this.state.rackView ? "Show selected effect only" : "Show all effects (rack view)"}
                                             onClick={() => this.handleRackViewToggle()}
@@ -893,9 +909,11 @@ export const MainPage =
                                     </div>
                                 )
                             }
-                            <div id="mainPageControls" className={this.state.rackView ? classes.controlContent : (horizontalScrollLayout ? classes.controlContentSmall : classes.controlContent)}>
+                            <div id="mainPageControls" className={(this.state.rackView || this.state.gpioView) ? classes.controlContent : (horizontalScrollLayout ? classes.controlContentSmall : classes.controlContent)}>
                                 {
-                                    this.state.rackView ? (
+                                    this.state.gpioView ? (
+                                        <GpioBindingsView />
+                                    ) : this.state.rackView ? (
                                         this.renderRackView()
                                     ) : missing ? (
                                         <div style={{ marginLeft: 40, marginTop: 20 }}>

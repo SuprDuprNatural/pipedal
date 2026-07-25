@@ -22,6 +22,7 @@
 #include "json.hpp"
 #include "json_variant.hpp"
 #include "MidiBinding.hpp"
+#include "Gpio.hpp"
 #include "StateInterface.hpp"
 #include "atom_object.hpp"
 
@@ -232,6 +233,10 @@ namespace pipedal
 
         int64_t selectedPlugin_ = -1;
 
+        // Hardware control mappings are part of a preset. GPIO pin and ADC
+        // configuration itself is global and is stored separately.
+        std::vector<GpioBinding> gpioBindings_;
+
 
     public:
 
@@ -270,6 +275,7 @@ namespace pipedal
         GETTER_SETTER_VEC(snapshots)
         GETTER_SETTER(selectedSnapshot)
         GETTER_SETTER(selectedPlugin)
+        GETTER_SETTER_VEC(gpioBindings)
 
         DECLARE_JSON_MAP(Pedalboard);
 

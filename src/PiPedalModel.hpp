@@ -44,6 +44,7 @@
 #include <unordered_map>
 #include "Tone3000Downloader.hpp"
 #include "Uri.hpp"
+#include <optional>
 #include "Tone3000Tone.hpp"
 
 namespace pipedal
@@ -92,6 +93,8 @@ namespace pipedal
         virtual void OnShowStatusMonitorChanged(bool show) = 0;
         virtual void OnAirplaySettingsChanged(const AirplaySettings &airplaySettings) = 0;
         virtual void OnSystemMidiBindingsChanged(const std::vector<MidiBinding> &bindings) = 0;
+        virtual void OnGpioSettingsChanged(const GpioSettings &settings) = 0;
+        virtual void OnGpioInputStatusChanged(const GpioInputStatus &status) = 0;
         virtual void OnNotifyPathPatchPropertyChanged(int64_t instanceId, const std::string &pathPatchPropertyString, const std::string &atomString) = 0;
 
         // virtual void OnPatchPropertyChanged(int64_t clientId, int64_t instanceId,const std::string& propertyUri,const json_variant& value) = 0;
@@ -151,6 +154,42 @@ namespace pipedal
         std::unique_ptr<std::jthread> pingThread;
 
         std::vector<MidiBinding> systemMidiBindings;
+
+        GpioSettings gpioSettings;
+        std::unique_ptr<GpioManager> gpioManager;
+        // Written from the Post dispatch thread while preset, binding and
+        // hardware-settings changes clear it from socket threads, so every
+        // access goes through the locked accessors below.
+        std::unordered_map<std::string, size_t> gpioSelectorIndices;
+        size_t AdvanceGpioSelector(const std::string &key, int32_t delta, size_t groupSize);
+        size_t GetGpioSelector(const std::string &key, size_t groupSize);
+        int64_t gpioPendingPresetId = -1;
+        int64_t gpioSelectedEffectId = -1;
+        void HandleGpioInputEvent(const GpioInputEvent &event);
+        bool HandleGpioRoleEvent(
+            const GpioInputEvent &event,
+            GpioEncoderRole role,
+            const std::vector<GpioBinding> &bindings);
+        std::vector<int64_t> GetGpioControllableEffects(const std::vector<GpioBinding> &bindings);
+        void ShowGpioWorkflowMessage(
+            const std::string &title,
+            const std::string &label,
+            const std::string &value);
+        GpioDisplayControl BuildGpioDisplayControl(
+            const GpioBinding &binding,
+            std::optional<float> value,
+            std::string *effectName);
+        void UpdateGpioDashboard(
+            const std::vector<GpioBinding> &bindings,
+            int32_t activeSlot = 0,
+            bool temporary = false);
+        void ExecuteGpioBinding(const GpioBinding &binding, const GpioInputEvent &event);
+        void ShowGpioBindingValue(
+            const GpioBinding &binding,
+            std::optional<float> value,
+            bool selecting = false);
+        void FireGpioSettingsChanged();
+        void FireGpioInputStatusChanged(const GpioInputStatus &status);
 
         std::unique_ptr<AvahiService> avahiService;
         uint16_t webPort;
@@ -466,6 +505,12 @@ namespace pipedal
 
         void SetSystemMidiBindings(std::vector<MidiBinding> &bindings);
         std::vector<MidiBinding> GetSystemMidiBidings();
+
+        GpioSettings GetGpioSettings();
+        void SetGpioSettings(const GpioSettings &settings);
+        GpioCapabilities GetGpioCapabilities();
+        std::vector<GpioInputStatus> GetGpioInputStatuses();
+        void SetGpioBindings(int64_t clientId, const std::vector<GpioBinding> &bindings);
 
         int64_t MonitorPort(int64_t instanceId, const std::string &key, float updateInterval, PortMonitorCallback onUpdate);
         void UnmonitorPort(int64_t subscriptionHandle);

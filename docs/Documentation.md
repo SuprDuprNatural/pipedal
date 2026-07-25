@@ -16,6 +16,7 @@
 #### [How to Use PiPedal](HowToUsePiPedal.md)
 #### [How to Build Presets With PiPedal](BuildingPresets.md)
 #### [An Intro to Snapshots](Snapshots.md)  
+#### [GPIO and I2C Hardware Controls](GpioControls.md)
 #### [Neural Amp Modeler Calibration](NamCalibration.md)  
 #### [Choosing a USB Audio Adapter](ChoosingAUsbAudioAdapter.md)  
 #### [Optimizing Audio Latency](AudioLatency.md)  
@@ -38,4 +39,3 @@
 #### [The Build Systems](TheBuildSystem.md)
 #### [How to Debug PiPedal](Debugging.md)
 #### [PiPedal Architecture](Architecture.md)
-

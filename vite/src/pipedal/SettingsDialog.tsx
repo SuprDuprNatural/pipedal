@@ -64,6 +64,7 @@ import OptionsDialog from './OptionsDialog';
 import { css } from '@emotion/react';
 import ScreenOrientation from './ScreenOrientation';
 import SelectScreenOrientationDialog from './SelectScreenOrientationDialog';
+import GpioSettingsDialog from './GpioSettingsDialog';
 
 
 interface SettingsDialogProps extends WithStyles<typeof styles> {
@@ -109,6 +110,7 @@ interface SettingsDialogState {
     showRestartOkDialog: boolean;
     showShutdownOkDialog: boolean;
     showSystemMidiBindingsDialog: boolean;
+    showGpioSettingsDialog: boolean;
 
     hasWifiDevice: boolean;
 };
@@ -222,6 +224,7 @@ const SettingsDialog = withStyles(
                 showShutdownOkDialog: false,
                 showRestartOkDialog: false,
                 showSystemMidiBindingsDialog: false,
+                showGpioSettingsDialog: false,
                 isAndroidHosted: this.model.isAndroidHosted(),
                 hasWifiDevice: this.model.hasWifiDevice.get()
             };
@@ -799,6 +802,30 @@ const SettingsDialog = withStyles(
 
                                 </div>
                             </div>
+                            {!this.props.onboarding && (
+                                <>
+                                    <Divider />
+                                    <div>
+                                        <Typography className={classes.sectionHead} display="block" variant="caption" color="secondary">
+                                            HARDWARE
+                                        </Typography>
+                                        <ButtonBase className={classes.setting}
+                                            onClick={() => this.setState({ showGpioSettingsDialog: true })}>
+                                            <SelectHoverBackground selected={false} showHover={true} />
+                                            <div style={{ width: "100%" }}>
+                                                <Typography className={classes.primaryItem} display="block" variant="body2" noWrap>
+                                                    GPIO / I2C buttons, encoders and display
+                                                </Typography>
+                                                <Typography className={classes.secondaryItem} display="block" variant="caption" color="textSecondary" noWrap>
+                                                    {this.model.gpioSettings.get().enabled
+                                                        ? `${this.model.gpioSettings.get().inputs.filter(input => input.enabled).length} input(s) enabled`
+                                                        : "Disabled"}
+                                                </Typography>
+                                            </div>
+                                        </ButtonBase>
+                                    </div>
+                                </>
+                            )}
                             <Divider />
                             {(!this.props.onboarding) &&
                                 (
@@ -1140,6 +1167,12 @@ const SettingsDialog = withStyles(
                             onClose={() => { this.setState({ showSystemMidiBindingsDialog: false }); }}
                         />
 
+                    )}
+                    {this.state.showGpioSettingsDialog && (
+                        <GpioSettingsDialog
+                            open={this.state.showGpioSettingsDialog}
+                            onClose={() => this.setState({ showGpioSettingsDialog: false })}
+                        />
                     )}
                     {this.state.showWindowScaleDialog && (
                         <OptionsDialog open={this.state.showWindowScaleDialog} options={getWindowScaleOptions()} value={getWindowScale()}

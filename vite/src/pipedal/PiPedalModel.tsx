@@ -53,6 +53,7 @@ import ChannelRouterSettings from './ChannelRouterSettings';
 import Tone3000DownloadProgress from './Tone3000DownloadProgress';
 import { Model, Tone } from './t3k/types';
 import { ModelSelectionDialogParams } from './ModelSelectionDialog';
+import { GpioBinding, GpioCapabilities, GpioInputStatus, GpioSettings } from './Gpio';
 
 
 export enum State {
@@ -612,6 +613,8 @@ export class PiPedalModel //implements PiPedalModel
                 MidiBinding.systemBinding("nextSnapshot")
             ]
         );
+    gpioSettings: ObservableProperty<GpioSettings> = new ObservableProperty<GpioSettings>(new GpioSettings());
+    gpioInputStatuses: ObservableProperty<GpioInputStatus[]> = new ObservableProperty<GpioInputStatus[]>([]);
     zoomedUiControl: ObservableProperty<ZoomedControlInfo | undefined> = new ObservableProperty<ZoomedControlInfo | undefined>(undefined);
 
     tone3000Downloading: ObservableProperty<boolean> = new ObservableProperty<boolean>(false);
@@ -1030,6 +1033,22 @@ export class PiPedalModel //implements PiPedalModel
         } else if (message === "onSystemMidiBindingsChanged") {
             let bindings = MidiBinding.deserialize_array(body);
             this.systemMidiBindings.set(bindings);
+        } else if (message === "onGpioSettingsChanged") {
+            const settings = new GpioSettings().deserialize(body);
+            const validInputIds = new Set(settings.inputs.map(input => input.id));
+            this.gpioSettings.set(settings);
+            this.gpioInputStatuses.set(
+                this.gpioInputStatuses.get().filter(status => validInputIds.has(status.inputId)));
+        } else if (message === "onGpioInputStatusChanged") {
+            const newStatus = new GpioInputStatus().deserialize(body);
+            const statuses = this.gpioInputStatuses.get().slice();
+            const index = statuses.findIndex(status => status.inputId === newStatus.inputId);
+            if (index === -1) {
+                statuses.push(newStatus);
+            } else {
+                statuses[index] = newStatus;
+            }
+            this.gpioInputStatuses.set(statuses);
         } else if (message === "onErrorMessage") {
             this.showAlert(body as string);
 
@@ -1524,6 +1543,18 @@ export class PiPedalModel //implements PiPedalModel
             this.favorites.set(await this.getWebSocket().request<FavoritesList>("getFavorites"));
 
             this.systemMidiBindings.set(MidiBinding.deserialize_array(await this.getWebSocket().request<MidiBinding[]>("getSystemMidiBindings")));
+
+            try {
+                this.gpioSettings.set(new GpioSettings().deserialize(
+                    await this.getWebSocket().request<any>("getGpioSettings")));
+                this.gpioInputStatuses.set(GpioInputStatus.deserializeArray(
+                    await this.getWebSocket().request<any[]>("getGpioInputStatuses")));
+            } catch {
+                // Compatibility with an older server while the web application
+                // is being updated or served from a browser cache.
+                this.gpioSettings.set(new GpioSettings());
+                this.gpioInputStatuses.set([]);
+            }
 
             // load at lest once before we allow a reconnect.
             this.getWebSocket().canReconnect = true;
@@ -2941,6 +2972,30 @@ export class PiPedalModel //implements PiPedalModel
         this.systemMidiBindings.set(result);
         this.webSocket?.send("setSystemMidiBindings", result);
     }
+
+    getGpioCapabilities(): Promise<GpioCapabilities> {
+        return this.getWebSocket().request<any>("getGpioCapabilities")
+            .then(value => new GpioCapabilities().deserialize(value));
+    }
+
+    setGpioSettings(settings: GpioSettings): Promise<void> {
+        const copy = settings.clone();
+        return this.getWebSocket().request<boolean>("setGpioSettings", copy)
+            .then(() => {
+                const validInputIds = new Set(copy.inputs.map(input => input.id));
+                this.gpioSettings.set(copy);
+                this.gpioInputStatuses.set(
+                    this.gpioInputStatuses.get().filter(status => validInputIds.has(status.inputId)));
+            });
+    }
+
+    setGpioBindings(bindings: GpioBinding[]): void {
+        const pedalboard = this.pedalboard.get().clone();
+        pedalboard.gpioBindings = bindings.map(binding => binding.clone());
+        this.setModelPedalboard(pedalboard);
+        this.getWebSocket().request<boolean>("setGpioBindings", pedalboard.gpioBindings)
+            .catch(error => this.showAlert(error));
+    }
     private midiListeners: MidiEventListener[] = [];
     private monitorPatchPropertyListeners: PatchPropertyListenerItem[] = [];
 
@@ -4052,6 +4107,4 @@ export class PiPedalModelFactory {
 
     }
 };
-
-
 

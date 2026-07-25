@@ -251,6 +251,7 @@ else()
 endif()
 
 set (PIPEDAL_SOURCES
+    Gpio.cpp Gpio.hpp
     Tone3000Tone.hpp Tone3000Tone.cpp
     AesDigest.cpp AesDigest.hpp
     ChannelRouterSettings.cpp ChannelRouterSettings.hpp
@@ -476,6 +477,7 @@ add_executable(pipedaltest
     testMain.cpp
 
     ModGuiTest.cpp
+    GpioTest.cpp
     PipewireInputStreamTest.cpp
 
     AudioFilesTest.cpp
@@ -946,4 +948,3 @@ install (TARGETS pipedald pipedaladmind pipedal_update DESTINATION ${CMAKE_INSTA
    )
 
    
-

@@ -2176,6 +2176,42 @@ void Storage::SetSystemMidiBindings(const std::vector<MidiBinding>& bindings)
         writer.write(bindings);
     }
 }
+
+void Storage::SetGpioSettings(const GpioSettings &gpioSettings)
+{
+    std::filesystem::path fileName = this->dataRoot / "config" / "GpioSettings.json";
+    std::filesystem::create_directories(fileName.parent_path());
+    pipedal::ofstream_synced stream;
+    stream.open(fileName);
+    if (!stream.is_open())
+    {
+        throw std::runtime_error("Unable to save GPIO settings.");
+    }
+    json_writer writer(stream, true);
+    writer.write(gpioSettings);
+}
+
+GpioSettings Storage::GetGpioSettings()
+{
+    GpioSettings result;
+    std::filesystem::path fileName = this->dataRoot / "config" / "GpioSettings.json";
+    std::ifstream stream(fileName);
+    if (stream.is_open())
+    {
+        try
+        {
+            json_reader reader(stream);
+            reader.read(&result);
+            GpioManager::Validate(result);
+        }
+        catch (const std::exception &e)
+        {
+            Lv2Log::warning(SS("Ignoring invalid GPIO settings. " << e.what()));
+            result = GpioSettings();
+        }
+    }
+    return result;
+}
 static bool hasBinding(std::vector<MidiBinding>& bindings, const std::string& name)
 {
     for (auto& binding : bindings)

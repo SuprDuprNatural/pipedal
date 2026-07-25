@@ -20,6 +20,7 @@
 import { PiPedalArgumentError } from './PiPedalError';
 import MidiBinding from './MidiBinding';
 import MidiChannelBinding from './MidiChannelBinding';
+import { GpioBinding } from './Gpio';
 
 
 const SPLIT_PEDALBOARD_ITEM_URI = "uri://two-play/pipedal/pedalboard#Split";
@@ -414,6 +415,7 @@ export class Pedalboard implements Deserializable<Pedalboard> {
         this.selectedSnapshot = input.selectedSnapshot;
         this.pathProperties = input.pathProperties;
         this.selectedPlugin = input.selectedPlugin??-1;
+        this.gpioBindings = GpioBinding.deserializeArray(input.gpioBindings);
         return this;
     }
 
@@ -430,6 +432,7 @@ export class Pedalboard implements Deserializable<Pedalboard> {
     selectedSnapshot: number = -1;
     pathProperties: {[Name: string]: string} = {};
     selectedPlugin: number = -1;
+    gpioBindings: GpioBinding[] = [];
 
     // yields all items in the pedalboard, including split items. Splits are yielded before their children.
     *itemsGenerator(): Generator<PedalboardItem, void, undefined> {
@@ -887,5 +890,4 @@ function* itemGeneratorSplitAfter_(items: PedalboardItem[]): Generator<Pedalboar
         yield item;
     }
 }
-
 

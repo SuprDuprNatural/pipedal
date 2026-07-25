@@ -1,0 +1,300 @@
+// Copyright (c) 2026 Robin Davies
+// SPDX-License-Identifier: MIT
+
+#include "pch.h"
+#include "catch.hpp"
+#include "Gpio.hpp"
+#include "GpioTuner.hpp"
+
+#include <cmath>
+#include <sstream>
+#include <stdexcept>
+#include <vector>
+
+using namespace pipedal;
+
+TEST_CASE("GPIO settings validation", "[gpio]")
+{
+    GpioSettings settings;
+    settings.enabled_ = true;
+
+    GpioInputConfiguration input;
+    input.id_ = "footswitch-1";
+    input.name_ = "Footswitch 1";
+    input.chip_ = "/dev/gpiochip0";
+    input.line_ = 17;
+    settings.inputs_.push_back(input);
+
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+
+    auto duplicate = input;
+    duplicate.id_ = "footswitch-2";
+    settings.inputs_.push_back(duplicate);
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+
+    settings.inputs_[1].enabled_ = false;
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+}
+
+TEST_CASE("GPIO analog channels are constrained to IIO", "[gpio]")
+{
+    GpioSettings settings;
+    settings.enabled_ = true;
+
+    GpioInputConfiguration input;
+    input.id_ = "expression";
+    input.inputType_ = static_cast<int32_t>(GpioInputType::Analog);
+    input.analogPath_ = "/tmp/not-an-adc";
+    settings.inputs_.push_back(input);
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+
+    settings.inputs_[0].analogPath_ = "/sys/bus/iio/devices/iio:device0/in_voltage0_raw";
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+
+    settings.inputs_[0].analogMax_ = settings.inputs_[0].analogMin_;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+}
+
+TEST_CASE("I2C encoder and display addresses are validated", "[gpio]")
+{
+    GpioSettings settings;
+    settings.enabled_ = true;
+    GpioInputConfiguration encoder;
+    encoder.id_ = "encoder-1";
+    encoder.inputType_ = static_cast<int32_t>(GpioInputType::Encoder);
+    encoder.i2cDevice_ = "/dev/i2c-1";
+    encoder.i2cAddress_ = 0x36;
+    settings.inputs_.push_back(encoder);
+    settings.display_.enabled_ = true;
+    settings.display_.i2cDevice_ = "/dev/i2c-1";
+    settings.display_.i2cAddress_ = 0x3C;
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+
+    settings.display_.i2cAddress_ = 0x36;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+    settings.display_.i2cAddress_ = 0x3C;
+    settings.inputs_[0].i2cDevice_ = "/tmp/not-i2c";
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+}
+
+TEST_CASE("Standard encoder roles migrate once and remain unique", "[gpio]")
+{
+    GpioSettings settings;
+    settings.enabled_ = true;
+    for (int32_t index = 0; index < 4; ++index)
+    {
+        GpioInputConfiguration encoder;
+        encoder.id_ = "encoder-" + std::to_string(index + 1);
+        encoder.inputType_ = static_cast<int32_t>(GpioInputType::Encoder);
+        encoder.i2cAddress_ = 0x39 - index; // migration sorts by address.
+        settings.inputs_.push_back(encoder);
+    }
+
+    REQUIRE(settings.EnsureStandardEncoderRoles());
+    REQUIRE(settings.encoderRolesConfigured_);
+    REQUIRE(settings.inputs_[3].encoderRole() == GpioEncoderRole::PresetBrowser);
+    REQUIRE(settings.inputs_[2].encoderRole() == GpioEncoderRole::EffectSelector);
+    REQUIRE(settings.inputs_[1].encoderRole() == GpioEncoderRole::Parameter1);
+    REQUIRE(settings.inputs_[0].encoderRole() == GpioEncoderRole::Parameter2);
+    REQUIRE_FALSE(settings.EnsureStandardEncoderRoles());
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+
+    settings.inputs_[0].encoderRole_ = settings.inputs_[1].encoderRole_;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+}
+
+TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
+{
+    GpioSettings source;
+    source.enabled_ = true;
+    GpioInputConfiguration input;
+    input.id_ = "switch-a";
+    input.name_ = "Switch A";
+    input.inputType_ = static_cast<int32_t>(GpioInputType::Latching);
+    input.line_ = 27;
+    input.activeLow_ = false;
+    source.inputs_.push_back(input);
+    source.display_.enabled_ = true;
+    source.display_.overlayTimeoutMs_ = 4250;
+    source.encoderRolesConfigured_ = true;
+
+    std::stringstream json;
+    json_writer writer(json, true);
+    writer.write(source);
+
+    GpioSettings restored;
+    json_reader reader(json);
+    reader.read(&restored);
+
+    REQUIRE(restored.enabled_);
+    REQUIRE(restored.encoderRolesConfigured_);
+    REQUIRE(restored.inputs_.size() == 1);
+    REQUIRE(restored.inputs_[0].id_ == "switch-a");
+    REQUIRE(restored.inputs_[0].inputType() == GpioInputType::Latching);
+    REQUIRE(restored.inputs_[0].line_ == 27);
+    REQUIRE_FALSE(restored.inputs_[0].activeLow_);
+    REQUIRE(restored.display_.enabled_);
+    REQUIRE(restored.display_.overlayTimeoutMs_ == 4250);
+
+    GpioBinding binding;
+    binding.inputId_ = "switch-a";
+    binding.actionType_ = static_cast<int32_t>(GpioActionType::Control);
+    binding.instanceId_ = 42;
+    binding.symbol_ = "gain";
+    binding.minValue_ = 10.0f;
+    binding.maxValue_ = -10.0f; // reversed ranges are intentionally supported.
+    binding.curve_ = 2.0f;
+    binding.mode_ = static_cast<int32_t>(GpioBindingMode::Relative);
+    binding.eventType_ = static_cast<int32_t>(GpioBindingEventType::EncoderTurn);
+    binding.stepValue_ = 0.25f;
+    binding.selectorInputId_ = "selector";
+    binding.parameterSlot_ = 2;
+
+    std::stringstream bindingJson;
+    json_writer bindingWriter(bindingJson, true);
+    bindingWriter.write(binding);
+    GpioBinding restoredBinding;
+    json_reader bindingReader(bindingJson);
+    bindingReader.read(&restoredBinding);
+    REQUIRE(restoredBinding.inputId_ == binding.inputId_);
+    REQUIRE(restoredBinding.symbol_ == binding.symbol_);
+    REQUIRE(restoredBinding.minValue_ == 10.0f);
+    REQUIRE(restoredBinding.maxValue_ == -10.0f);
+    REQUIRE(restoredBinding.curve_ == 2.0f);
+    REQUIRE(restoredBinding.mode() == GpioBindingMode::Relative);
+    REQUIRE(restoredBinding.eventType() == GpioBindingEventType::EncoderTurn);
+    REQUIRE(restoredBinding.stepValue_ == 0.25f);
+    REQUIRE(restoredBinding.selectorInputId_ == "selector");
+    REQUIRE(restoredBinding.parameterSlot_ == 2);
+}
+
+TEST_CASE("Built-in GPIO tuner locks accurately on bass notes", "[gpio]")
+{
+    constexpr uint32_t sampleRate = 44100;
+    constexpr float frequency = 55.0f; // A1 / MIDI 33.
+    constexpr float pi = 3.14159265358979323846f;
+    std::vector<float> samples(sampleRate * 3 / 4);
+    for (size_t i = 0; i < samples.size(); ++i)
+    {
+        samples[i] =
+            0.25f * std::sin(
+                        2.0f * pi * frequency *
+                        static_cast<float>(i) /
+                        static_cast<float>(sampleRate));
+    }
+
+    GpioTunerAnalyzer analyzer;
+    analyzer.Initialize(sampleRate);
+    for (size_t position = 0; position < samples.size(); position += 257)
+    {
+        size_t count = std::min<size_t>(257, samples.size() - position);
+        analyzer.Process(samples.data() + position, count);
+    }
+
+    const auto &frame = analyzer.Frame();
+    REQUIRE(frame.Locked());
+    REQUIRE(frame.note == 33);
+    REQUIRE(frame.NoteName() == "A");
+    REQUIRE(std::abs(frame.frequency - frequency) < 0.03f);
+    REQUIRE(std::abs(frame.cents) < 0.5f);
+
+    GpioTunerFrame sharpFrame;
+    sharpFrame.note = 42;
+    sharpFrame.confidence = 1.0f;
+    REQUIRE(sharpFrame.NoteName() == "F#");
+}
+
+TEST_CASE("GPIO display values use explicit missing state under fast math", "[gpio]")
+{
+    constexpr float currentValue = 5.7f;
+    constexpr float suppliedValue = 0.9f;
+    const float notFinite = std::numeric_limits<float>::quiet_NaN();
+
+    REQUIRE(ResolveGpioDisplayValue(
+                std::nullopt, currentValue, 0.0f) == Approx(currentValue));
+    REQUIRE(ResolveGpioDisplayValue(
+                suppliedValue, currentValue, 0.0f) == Approx(suppliedValue));
+    REQUIRE(ResolveGpioDisplayValue(
+                notFinite, currentValue, 1.0f) == Approx(1.0f));
+    REQUIRE(ResolveGpioDisplayValue(
+                std::nullopt, notFinite, 1.0f) == Approx(1.0f));
+}
+
+TEST_CASE("Non-finite values are rejected without std::isfinite", "[gpio]")
+{
+    // Release builds are compiled -ffast-math. std::isfinite may be folded to
+    // true there, so these checks must not depend on it.
+    const float quietNan = std::numeric_limits<float>::quiet_NaN();
+    const float infinity = std::numeric_limits<float>::infinity();
+
+    REQUIRE(IsFiniteGpioValue(0.0f));
+    REQUIRE(IsFiniteGpioValue(-1234.5f));
+    REQUIRE(IsFiniteGpioValue(std::numeric_limits<float>::denorm_min()));
+    REQUIRE(IsFiniteGpioValue(std::numeric_limits<float>::max()));
+    REQUIRE_FALSE(IsFiniteGpioValue(quietNan));
+    REQUIRE_FALSE(IsFiniteGpioValue(infinity));
+    REQUIRE_FALSE(IsFiniteGpioValue(-infinity));
+
+    // The same guard keeps a non-finite analog calibration out of the settings
+    // file, where every later range comparison would silently succeed.
+    GpioSettings settings;
+    settings.enabled_ = true;
+    GpioInputConfiguration input;
+    input.id_ = "expression";
+    input.inputType_ = static_cast<int32_t>(GpioInputType::Analog);
+    input.analogPath_ = "/sys/bus/iio/devices/iio:device0/in_voltage0_raw";
+    settings.inputs_.push_back(input);
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+
+    settings.inputs_[0].analogMax_ = quietNan;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+    settings.inputs_[0].analogMax_ = 4095.0f;
+    settings.inputs_[0].smoothing_ = quietNan;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+}
+
+TEST_CASE("A persistent dashboard does not restart the overlay timeout", "[gpio]")
+{
+    // The temporary dashboard is what an encoder turn shows over Waveform or
+    // Tuner; refreshing the persistent one must not extend or cancel it, and
+    // neither may change the mode that resumes afterwards.
+    auto manager = GpioManager::Create();
+    REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Waveform);
+
+    GpioDisplayDashboard dashboard;
+    dashboard.effectName = "TEST EFFECT";
+    manager->ShowTemporaryControlDashboard(dashboard);
+    REQUIRE(manager->GetDisplayMode() == GpioDisplayMode::Waveform);
+
+    dashboard.effectName = "UPDATED";
+    manager->ShowControlDashboard(dashboard);
+    REQUIRE(manager->GetDisplayMode() == GpioDisplayMode::Waveform);
+
+    manager->ClearDisplayMessage();
+    REQUIRE(manager->GetDisplayMode() == GpioDisplayMode::Waveform);
+}
+
+TEST_CASE("OLED mode button cycles controls waveform and tuner", "[gpio]")
+{
+    auto manager = GpioManager::Create();
+    REQUIRE(manager->GetDisplayMode() == GpioDisplayMode::Controls);
+    REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Waveform);
+    GpioDisplayDashboard dashboard;
+    dashboard.effectName = "TEST EFFECT";
+    dashboard.controls[0].assigned = true;
+    dashboard.controls[0].label = "GAIN";
+    dashboard.controls[0].value = "0.5";
+    dashboard.controls[0].normalizedValue = 0.5f;
+    manager->ShowTemporaryControlDashboard(dashboard);
+    // A temporary parameter view must not change the mode that resumes after
+    // the configured overlay timeout.
+    REQUIRE(manager->GetDisplayMode() == GpioDisplayMode::Waveform);
+    REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Tuner);
+    REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Controls);
+
+    GpioSettings settings;
+    settings.display_.waveformEnabled_ = false;
+    manager->Configure(settings);
+    REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Tuner);
+    REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Controls);
+}

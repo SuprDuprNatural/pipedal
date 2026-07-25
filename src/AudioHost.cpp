@@ -536,6 +536,19 @@ private:
     std::atomic<bool> audioStopped = false;
     std::atomic<bool> isDummyAudioDriver = false;
 
+    static constexpr size_t WAVEFORM_BUFFER_SIZE = 512;
+    std::array<std::atomic<int16_t>, WAVEFORM_BUFFER_SIZE> inputWaveform_{};
+    std::array<std::atomic<int16_t>, WAVEFORM_BUFFER_SIZE> outputWaveform_{};
+    std::atomic<uint64_t> inputWaveformWriteIndex_ = 0;
+    std::atomic<uint64_t> outputWaveformWriteIndex_ = 0;
+    uint32_t inputWaveformCountdown_ = 0;   // realtime thread only
+    uint32_t outputWaveformCountdown_ = 0;  // realtime thread only
+
+    static constexpr size_t GPIO_TUNER_BUFFER_SIZE = 32768;
+    std::array<std::atomic<int16_t>, GPIO_TUNER_BUFFER_SIZE> gpioTunerInput_{};
+    std::atomic<uint64_t> gpioTunerWriteIndex_ = 0;
+    std::atomic<uint32_t> gpioTunerSampleRate_ = 0;
+
     std::shared_ptr<Lv2Pedalboard> currentPedalboard;
     std::shared_ptr<Lv2Pedalboard> currentMainInsertPedalboard;
     std::shared_ptr<Lv2Pedalboard> currentAuxInsertPedalboard;
@@ -594,6 +607,8 @@ private:
 
             active = false;
         }
+        gpioTunerSampleRate_.store(0, std::memory_order_release);
+        gpioTunerWriteIndex_.store(0, std::memory_order_release);
 
         audioDriver->Close();
 
@@ -1357,6 +1372,69 @@ private:
             }
         }
     }
+
+    void CaptureWaveform(size_t nFrames, bool output)
+    {
+        const auto &channels = output ? pHost->GetChannelSelection().mainOutputChannels()
+                                      : pHost->GetChannelSelection().mainInputChannels();
+        if (channels.empty() || channels[0] < 0) return;
+        auto &buffers = output ? audioDriver->DeviceOutputBuffers() : audioDriver->DeviceInputBuffers();
+        if (static_cast<size_t>(channels[0]) >= buffers.size()) return;
+        float *left = buffers[channels[0]];
+        float *right = nullptr;
+        if (channels.size() > 1 && channels[1] >= 0 && static_cast<size_t>(channels[1]) < buffers.size())
+            right = buffers[channels[1]];
+
+        auto &waveform = output ? outputWaveform_ : inputWaveform_;
+        auto &publishedIndex = output ? outputWaveformWriteIndex_ : inputWaveformWriteIndex_;
+        uint32_t &countdown = output ? outputWaveformCountdown_ : inputWaveformCountdown_;
+        uint64_t index = publishedIndex.load(std::memory_order_relaxed);
+        uint32_t stride = std::max<uint32_t>(1, sampleRate / 4000);
+        for (size_t frame = 0; frame < nFrames; ++frame)
+        {
+            if (countdown != 0)
+            {
+                --countdown;
+                continue;
+            }
+            countdown = stride - 1;
+            float value = right ? (left[frame] + right[frame]) * 0.5f : left[frame];
+            value = std::clamp(value, -1.0f, 1.0f);
+            waveform[index % WAVEFORM_BUFFER_SIZE].store(
+                static_cast<int16_t>(std::lround(value * 32767.0f)), std::memory_order_relaxed);
+            ++index;
+        }
+        publishedIndex.store(index, std::memory_order_release);
+    }
+
+    void CaptureGpioTunerInput(size_t nFrames)
+    {
+        const auto &channels = pHost->GetChannelSelection().mainInputChannels();
+        if (channels.empty() || channels[0] < 0)
+            return;
+        auto &buffers = audioDriver->DeviceInputBuffers();
+        if (static_cast<size_t>(channels[0]) >= buffers.size())
+            return;
+        float *left = buffers[channels[0]];
+        float *right = nullptr;
+        if (channels.size() > 1 && channels[1] >= 0 &&
+            static_cast<size_t>(channels[1]) < buffers.size())
+        {
+            right = buffers[channels[1]];
+        }
+
+        uint64_t index = gpioTunerWriteIndex_.load(std::memory_order_relaxed);
+        for (size_t frame = 0; frame < nFrames; ++frame)
+        {
+            float value = right ? (left[frame] + right[frame]) * 0.5f : left[frame];
+            value = std::clamp(value, -1.0f, 1.0f);
+            gpioTunerInput_[index % GPIO_TUNER_BUFFER_SIZE].store(
+                static_cast<int16_t>(std::lround(value * 32767.0f)),
+                std::memory_order_relaxed);
+            ++index;
+        }
+        gpioTunerWriteIndex_.store(index, std::memory_order_release);
+    }
     bool IsRoutedDeviceOutputChannel(int32_t channel) const
     {
         for (auto routedChannel : channelSelection.mainOutputChannels())
@@ -1433,6 +1511,9 @@ private:
             realtimeActivePedalboard->ComputeVus(this->realtimeVuBuffers, nFrames);
         }
         ComputeMasterVus(nFrames);
+        CaptureGpioTunerInput(nFrames);
+        CaptureWaveform(nFrames, false);
+        CaptureWaveform(nFrames, true);
         // periodically send updates.
         realtimeVuSamplesRemaining -= nFrames;
         if (realtimeVuSamplesRemaining <= 0)
@@ -1547,6 +1628,65 @@ public:
     virtual uint32_t GetSampleRate()
     {
         return this->sampleRate;
+    }
+    virtual bool GetWaveform(bool output, std::array<float, 128> *values) const override
+    {
+        if (!values) return false;
+        const auto &waveform = output ? outputWaveform_ : inputWaveform_;
+        const auto &publishedIndex = output ? outputWaveformWriteIndex_ : inputWaveformWriteIndex_;
+        uint64_t end = publishedIndex.load(std::memory_order_acquire);
+        if (end == 0)
+        {
+            values->fill(0.0f);
+            return false;
+        }
+        size_t available = static_cast<size_t>(std::min<uint64_t>(end, values->size()));
+        size_t padding = values->size() - available;
+        std::fill(values->begin(), values->begin() + padding, 0.0f);
+        uint64_t start = end - available;
+        for (size_t i = 0; i < available; ++i)
+        {
+            int16_t sample = waveform[(start + i) % WAVEFORM_BUFFER_SIZE].load(std::memory_order_relaxed);
+            (*values)[padding + i] = static_cast<float>(sample) / 32767.0f;
+        }
+        return true;
+    }
+    virtual size_t ReadGpioTunerInput(
+        uint64_t *readIndex,
+        float *values,
+        size_t capacity,
+        uint32_t *sampleRateOut) const override
+    {
+        if (!readIndex || !values || capacity == 0 || !sampleRateOut)
+            return 0;
+        *sampleRateOut = gpioTunerSampleRate_.load(std::memory_order_acquire);
+        if (*sampleRateOut == 0)
+            return 0;
+
+        const uint64_t end = gpioTunerWriteIndex_.load(std::memory_order_acquire);
+        uint64_t start = *readIndex;
+        if (start == std::numeric_limits<uint64_t>::max() || start > end)
+        {
+            start = end > GPIO_TUNER_BUFFER_SIZE
+                        ? end - GPIO_TUNER_BUFFER_SIZE
+                        : 0;
+        }
+        else if (end - start > GPIO_TUNER_BUFFER_SIZE)
+        {
+            start = end - GPIO_TUNER_BUFFER_SIZE;
+        }
+
+        const size_t count = static_cast<size_t>(
+            std::min<uint64_t>(end - start, capacity));
+        for (size_t i = 0; i < count; ++i)
+        {
+            const int16_t sample =
+                gpioTunerInput_[(start + i) % GPIO_TUNER_BUFFER_SIZE].load(
+                    std::memory_order_relaxed);
+            values[i] = static_cast<float>(sample) / 32767.0f;
+        }
+        *readIndex = start + count;
+        return count;
     }
     void HandleAlsaSequencerDevicesChanged(
         AlsaSequencerDeviceMonitor::MonitorAction action, int client, const std::string &clientName)
@@ -1957,6 +2097,8 @@ public:
             audioDriver->Open(jackServerSettings, this->channelSelection);
             audioDriver->SetAlsaSequencer(this->alsaSequencer);
             this->sampleRate = audioDriver->GetSampleRate();
+            gpioTunerWriteIndex_.store(0, std::memory_order_release);
+            gpioTunerSampleRate_.store(this->sampleRate, std::memory_order_release);
 
             this->overrunGracePeriodSamples = (uint64_t)(((uint64_t)this->sampleRate) * OVERRUN_GRACE_PERIOD_S);
             this->vuSamplesPerUpdate = (size_t)(sampleRate * VU_UPDATE_RATE_S);

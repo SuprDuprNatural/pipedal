@@ -33,6 +33,7 @@
 #include "json_variant.hpp"
 #include "RealtimeMidiEventType.hpp"
 #include "ChannelRouterSettings.hpp"
+#include <array>
 
 namespace pipedal
 {
@@ -234,6 +235,16 @@ namespace pipedal
 
         virtual void SetAlsaSequencerConfiguration(const AlsaSequencerConfiguration &alsaSequencerConfiguration) = 0;
         virtual uint32_t GetSampleRate() = 0;
+        // Lock-free oscilloscope snapshot for small local hardware displays.
+        virtual bool GetWaveform(bool output, std::array<float, 128> *values) const = 0;
+        // Read newly captured mono input samples for the optional GPIO/OLED
+        // tuner. Set *readIndex to UINT64_MAX to begin with the most recent
+        // retained history. This never consumes or alters the audio path.
+        virtual size_t ReadGpioTunerInput(
+            uint64_t *readIndex,
+            float *values,
+            size_t capacity,
+            uint32_t *sampleRate) const = 0;
 
         virtual JackConfiguration GetServerConfiguration() = 0;
 

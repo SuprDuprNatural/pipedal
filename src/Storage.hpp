@@ -34,6 +34,7 @@
 #include "AlsaSequencer.hpp"
 #include "ChannelRouterSettings.hpp"
 #include "AirplaySettings.hpp"
+#include "Gpio.hpp"
 
 
 
@@ -161,6 +162,9 @@ public:
 
     AirplaySettings GetAirplaySettings();
     void SetAirplaySettings(const pipedal::AirplaySettings&airplaySettings);
+
+    GpioSettings GetGpioSettings();
+    void SetGpioSettings(const GpioSettings &gpioSettings);
 
     void LoadWifiConfigSettings();
     void LoadWifiDirectConfigSettings();
