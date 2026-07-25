@@ -2,11 +2,13 @@
 # Build the PiPedal UI and stage it on the Pi for the Supr console-face
 # panels, then refresh ~/supr-deploy.sh on the Pi to match the new bundle.
 #
-# Run from anywhere on the Mac:  bash ~/AI/claude/pipedal/vite/restage-supr-ui.sh
-# Afterwards, on the Pi:         ~/supr-deploy.sh   (needs sudo)
+# Run from anywhere:      bash path/to/pipedal/vite/restage-supr-ui.sh
+# Afterwards, on the Pi:  ~/supr-deploy.sh   (needs sudo)
 #
-# Uses password ssh (lukepi4@pi4). If ssh keys are set up (ssh-copy-id),
-# plain ssh/scp are used instead and this is much faster.
+# Set PI to your own account and host, e.g.
+#   PI=pi@mypedal.local bash restage-supr-ui.sh
+# Key auth is used when it is available (ssh-copy-id), which is much faster;
+# otherwise the script falls back to password ssh and prompts per connection.
 
 cd "$(dirname "$0")"
 
@@ -20,7 +22,7 @@ MAIN_JS=${MAIN_GZ%.gz}
 BASE=$(basename "$MAIN_JS")
 echo "== bundle: $BASE =="
 
-PI=lukepi4@pi4
+PI="${PI:-pi@raspberrypi.local}"
 
 if ssh -o BatchMode=yes -o ConnectTimeout=8 $PI true 2>/dev/null; then
     echo "== key auth available: scp direct =="

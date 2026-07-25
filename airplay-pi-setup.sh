@@ -5,13 +5,14 @@
 #   * a clone of rerdavies/pipedal at v2.0.108 in ~/src/pipedal
 #       git clone --branch v2.0.108 --depth 1 --recurse-submodules \
 #           --shallow-submodules https://github.com/rerdavies/pipedal.git ~/src/pipedal
-#   * the airplay source patch at /tmp/airplay-src.patch. From the Mac:
-#       cd ~/AI/claude/pipedal && git diff v2.0.108 -- src > /tmp/airplay-src.patch
-#       scp /tmp/airplay-src.patch lukepi4@pi4:/tmp/
+#   * the airplay source patch at /tmp/airplay-src.patch. From your workstation,
+#     with PI set to your own account and host (e.g. pi@raspberrypi.local):
+#       cd path/to/pipedal && git diff v2.0.108 -- src > /tmp/airplay-src.patch
+#       scp /tmp/airplay-src.patch "$PI":/tmp/
 #     (works from the airplay working tree whether or not the changes are committed;
 #      rack-view never touched src/, so this diff is exactly the airplay feature)
-#   * (optional) the freshly built web UI. From the Mac:
-#       scp -r ~/AI/claude/pipedal/vite/dist lukepi4@pi4:/tmp/react-dist
+#   * (optional) the freshly built web UI:
+#       scp -r path/to/pipedal/vite/dist "$PI":/tmp/react-dist
 #
 # Then run this script ON the Pi:
 #   bash airplay-pi-setup.sh
