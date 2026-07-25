@@ -15,6 +15,7 @@ import { PedalboardItem } from './Pedalboard';
 import PluginControlView, { ICustomizationHost, ControlGroup, ControlViewCustomization } from './PluginControlView';
 import SuprMeterControl, { MeterTick } from './SuprMeterControl';
 import SuprResponsePlot from './SuprResponsePlot';
+import SuprTunerDisplay from './SuprTunerDisplay';
 import { PanelColumn, SuprPanelUnit, mapControlNodes } from './SuprPanel';
 import ToobSpectrumResponseView from './ToobSpectrumResponseView';
 
@@ -23,6 +24,7 @@ const SUPR_VU_URI = "https://suprduprnatural.github.io/supr-pedals/vu-meter";
 const SUPR_OCTAVE_URI = "https://suprduprnatural.github.io/supr-pedals/octave";
 const SUPR_OCTAVE_PLUS_URI = "https://suprduprnatural.github.io/supr-pedals/octave-plus";
 const SUPR_ENV_FILTER_URI = "https://suprduprnatural.github.io/supr-pedals/envelope-filter";
+const SUPR_TUNER_URI = "https://suprduprnatural.github.io/supr-pedals/tuner";
 
 const styles = (theme: Theme) => createStyles({});
 
@@ -389,6 +391,22 @@ const SuprEnvFilterView = makePanelView((ctx) => [
     { sections: [{ label: "Output", rows: [["blend"], ["level"]] }] },
 ]);
 
+const SuprTunerView = makePanelView((ctx) => [
+    {
+        grow: 0, sections: [{
+            rows: [[(
+                <SuprTunerDisplay key="supr_tuner_display"
+                    instanceId={ctx.instanceId} />
+            )]]
+        }]
+    },
+    {
+        sections: [{
+            rows: [["mute"]]
+        }]
+    },
+]);
+
 export class SuprCompressorViewFactory implements IControlViewFactory {
     uri: string = SUPR_COMPRESSOR_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
@@ -421,6 +439,13 @@ export class SuprEnvFilterViewFactory implements IControlViewFactory {
     uri: string = SUPR_ENV_FILTER_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
         return (<SuprEnvFilterView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+export class SuprTunerViewFactory implements IControlViewFactory {
+    uri: string = SUPR_TUNER_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprTunerView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
     }
 }
 
