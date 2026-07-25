@@ -7,6 +7,12 @@ core
 
 Testing/
 
+# Local development credentials (never commit).
+username.txt
+
+# macOS Finder metadata.
+.DS_Store
+
 react/package-lock.json
 
 src/dbus/bluez_adaptor.h
