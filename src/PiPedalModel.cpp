@@ -488,12 +488,27 @@ void PiPedalModel::Load()
     }
 
     {
-        // the pipedal-airplay service (if enabled) is started by systemd; we just
-        // need to bring up the FIFO reader and set the stream gain.
+        // The AirPlay receiver always starts off. Leaving it enabled across a
+        // restart advertises a receiver nobody asked for, and a sender that was
+        // mid-session when the Pi went down comes back to a half-open session
+        // rather than a clean one. Volume and output routing are remembered.
         AirplaySettings airplaySettings = storage.GetAirplaySettings();
         audioHost->SetAirplayVolume(airplaySettings.volume_);
         audioHost->SetAirplayOutputChannel(airplaySettings.outputChannel_);
-        audioHost->SetAirplayStreamEnabled(airplaySettings.enabled_);
+        audioHost->SetAirplayStreamEnabled(false);
+        if (airplaySettings.enabled_)
+        {
+            airplaySettings.enabled_ = false;
+            try
+            {
+                storage.SetAirplaySettings(airplaySettings);
+                UpdateAirplayServiceConfiguration(airplaySettings);
+            }
+            catch (const std::exception &e)
+            {
+                Lv2Log::warning(SS("Unable to stop the AirPlay receiver at startup. " << e.what()));
+            }
+        }
     }
 
     RestartAudio();

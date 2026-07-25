@@ -90,5 +90,6 @@ sudo systemctl start pipedald
 
 echo
 echo "Done. Toggle AirPlay on from the switch in the PiPedal toolbar."
-echo "The first enable writes /etc/alsa/conf.d/99-pipedal-airplay.conf,"
-echo "/etc/pipedal/shairport-sync.conf and pipedal-airplay.service, then starts it."
+echo "The first enable writes /etc/pipedal/shairport-sync.conf and"
+echo "pipedal-airplay.service, then starts it. AirPlay is always off after a"
+echo "pipedald restart; see docs/AirPlay.md."

@@ -306,8 +306,13 @@ bool setAirplayConfiguration(const AirplayServiceConfiguration &configuration)
         "pipe = {\n"
         "  name = \"" << configuration.fifoPath_ << "\";\n"
         "};\n"
+        // allow_session_interruption lets a returning sender take over a session
+        // that was never torn down. Without it, a Mac whose previous session
+        // ended abruptly (PiPedal switched off, network dropped) is refused for
+        // session_timeout seconds and reports the receiver as unavailable.
         "sessioncontrol = {\n"
-        "  session_timeout = 20;\n"
+        "  allow_session_interruption = \"yes\";\n"
+        "  session_timeout = 10;\n"
         "};\n"));
 
     writeFileOrThrow(AIRPLAY_SERVICE_PATH, SS(
@@ -328,6 +333,10 @@ bool setAirplayConfiguration(const AirplayServiceConfiguration &configuration)
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "LimitRTPRIO=10\n"
+        // SIGTERM lets shairport-sync withdraw its Avahi record before it exits,
+        // so senders stop seeing a receiver that is no longer there.
+        "KillSignal=SIGTERM\n"
+        "TimeoutStopSec=10\n"
         "\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"));
@@ -336,7 +345,10 @@ bool setAirplayConfiguration(const AirplayServiceConfiguration &configuration)
     // the stock shairport-sync service would advertise a second (broken) AirPlay
     // endpoint pointing at the ALSA device that PiPedal owns.
     silentSysExec("/usr/bin/systemctl disable --now shairport-sync.service");
-    silentSysExec("/usr/bin/systemctl enable pipedal-airplay.service");
+    // Deliberately not enabled: pipedald turns AirPlay off at startup, so a unit
+    // that systemd started at boot would only advertise a receiver for the few
+    // seconds before pipedald shut it down again.
+    silentSysExec("/usr/bin/systemctl disable pipedal-airplay.service");
     int rc = sysExec("/usr/bin/systemctl restart pipedal-airplay.service");
     if (rc != EXIT_SUCCESS)
     {
