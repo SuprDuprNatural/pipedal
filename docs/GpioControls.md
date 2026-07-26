@@ -7,7 +7,7 @@ title: GPIO Hardware Controls
 
 PiPedal can use Raspberry Pi GPIO buttons and switches, Linux IIO analog inputs, and Adafruit seesaw I²C rotary encoders. Hardware inputs are configured once, while their mappings are stored in each preset. A control can therefore adjust gain in one preset and delay feedback in another.
 
-An optional 128x64 SSD1306 I²C OLED normally shows the selected effect and two mapped parameters as a compact two-knob display. Encoder 2 switches between that control dashboard, a live input/output waveform, and a built-in bass-first strobe tuner.
+With the standard four-encoder rig, the parameter encoders reach every effect without any per-preset setup: one encoder scrolls through every parameter in the chain, and two knobs change the two currently shown. An optional 128x64 SSD1306 I²C OLED shows those two side by side. Pressing the scroll encoder switches between that display, a live input/output waveform, and a built-in bass-first strobe tuner.
 
 ## Electrical safety
 
@@ -64,13 +64,14 @@ The same setup button assigns a standard controller role to each encoder:
 | Encoder | Standard role |
 | --- | --- |
 | Encoder 1 | Turn to browse presets; press to load the displayed preset |
-| Encoder 2 | Turn to select an effect; press to cycle controls, waveform, and tuner OLED views |
-| Encoder 3 | Change Parameter 1 for the selected effect |
-| Encoder 4 | Change Parameter 2 for the selected effect |
+| Encoder 2 | Turn to scroll through every parameter in the chain; press to cycle parameter, waveform, and tuner OLED views |
+| Encoder 3 | Change the parameter shown on the left |
+| Encoder 4 | Change the parameter shown on the right |
 
-Roles are global and can be reassigned on any encoder card. Parameter 1 and
-Parameter 2 targets are saved per preset, so the same physical controls adapt
-to every rig without inheriting a stale absolute knob position.
+Roles are global and can be reassigned on any encoder card. Nothing is assigned
+per effect: encoder 2 walks a list built from the preset itself, and where you
+are scrolled to is saved with the preset, so each rig comes back to the two
+parameters you left it on.
 
 ### Enable and wire I²C
 
@@ -87,17 +88,39 @@ Connect the shared bus to Pi 3.3 V, ground, SDA (BCM GPIO 2, physical pin 3), an
 
 The installer adds `pipedal_d` to both the `gpio` and `i2c` groups when present. Reinstall the updated package and reboot before testing so the service receives its new group membership.
 
-## Map controls in a preset
+## Scroll through parameters
+
+Turning encoder 2 moves along one list containing every parameter of every
+effect in the current chain, in chain order. Each click moves the two-parameter
+window by one, so the parameter that was on the right moves to the left and a
+new one appears on the right. The list wraps at the end.
+
+Only parameters that the web interface itself gives you a control for are
+included. Ports a plugin marks as not shown on its user interface, bypass
+ports, and output-only meters are all left out, so an encoder cannot reach a
+parameter you would never adjust by hand.
+
+Encoders 3 and 4 change the left and right parameter. One click is one of the
+parameter's own steps: between declared scale points for an enumerated control,
+one unit for an integer, one declared step where a plugin declares them, and
+otherwise a fraction of the range set by **Clicks per full range** in the
+hardware settings. Logarithmic parameters move by a constant ratio, so a click
+feels the same at both ends of a frequency control.
+
+Where you are scrolled to is stored in the preset, as the parameter itself
+rather than a position in the list. Adding, removing or reordering effects
+therefore keeps the window on the parameter you chose. Save the preset to keep
+the position across a restart.
+
+## Map footswitches, pedals and push buttons
 
 Open a preset and select the circuit-board icon in the main effect toolbar. This switches the lower panel to **Hardware controls for this preset**.
 
-With the standard four-encoder roles enabled, each controllable effect has two
-parameter selectors. Choose the desired Parameter 1 and Parameter 2 controls
-and, if necessary, adjust the parameter step per click. Effects with neither
-parameter assigned are skipped by Encoder 2.
-
-Select **Show advanced mappings** to use the free-form mapping system. Choose
-**Add advanced mapping**, then select an input and action. Supported actions include:
+Choose **Add mapping**, then select an input and action. Inputs that the
+standard workflow already uses are not offered: an encoder holding a role turns
+its own way, and encoders 1 and 2 use their push buttons as well. The push
+buttons of encoders 3 and 4 are free, and are the natural place for effect
+on/bypass or a snapshot. Supported actions include:
 
 - effect parameters, input level, and output level;
 - effect on/bypass;
@@ -128,18 +151,17 @@ are retried and discarded before they can reach an effect or the OLED.
 This means assigning or changing a mapping can never jump a parameter to an
 encoder's historical position.
 
-### Advanced encoder turn, push button, and selectors
+### Encoder turn and push button
 
 Each I²C encoder supplies two independently assignable controls:
 
 - **Turn** changes a parameter relative to its current value. Set **Value per encoder click** to choose fine or coarse parameter adjustment; the incoming hardware event itself is always one unit. Enumerated LV2 parameters automatically move between their declared scale points, and integer parameters stay integral.
 - **Push button** behaves like a normal momentary button, so it can toggle bypass, load a preset, select a snapshot, or run another action.
 
-An encoder can control several parameters simultaneously by leaving every mapping's **Selected by** field at **Always active**.
-
-To make one encoder select what another encoder edits, add two or more parameter mappings for the controlled encoder and choose the same selector encoder in **Selected by** on each mapping. Turning the selector cycles that group; the OLED immediately shows the selected effect and parameter. Turning the controlled encoder changes only the selected mapping. The selector's push button remains available for an independent action.
-
-Because mappings are stored in the pedalboard, both the assigned parameters and selector groups may be completely different in every preset.
+Turn is only offered on an encoder whose controller role is **Unassigned**. On
+an encoder holding a standard role, only the push button can be mapped, and
+only for the two parameter encoders. Mappings left over from an older
+configuration that can no longer fire are removed when the preset is loaded.
 
 ## OLED behavior
 
@@ -150,15 +172,21 @@ The SSD1306 settings include:
 - waveform view enabled/disabled and input/output source;
 - OLED refresh interval and 180-degree rotation.
 
-The control dashboard is the default screen. It shows the selected effect, both parameter labels and formatted values, and two minimal knob indicators that move as Encoder 3 or 4 changes a value. Preset browsing temporarily replaces it with the current preset in small text and the candidate preset in large text.
+The parameter display is the default screen. Each half shows one of the two
+current parameters: its effect, a knob indicator, the parameter name, and the
+formatted value. Both halves share one heading while the two parameters belong
+to the same effect. A bar along the bottom edge shows how far through the
+chain's parameters you have scrolled. Preset browsing temporarily replaces the
+whole screen with the current preset in small text and the candidate preset in
+large text.
 
-Turning Encoder 2, 3, or 4 temporarily shows the two-knob dashboard even when
+Turning Encoder 2, 3, or 4 temporarily shows the parameter display even when
 the waveform or tuner is the selected screen. After the configured temporary
 message time, the OLED returns to the previously selected screen.
 
 Press Encoder 2 to cycle:
 
-1. the two-knob control dashboard;
+1. the two-parameter display;
 2. the live waveform;
 3. the built-in chromatic strobe tuner.
 
@@ -188,6 +216,8 @@ Return to the GPIO settings screen and select the channel. Common ADC resolution
 - **Line is busy:** choose another GPIO or disable the kernel feature currently using the line.
 - **A button works backwards:** toggle **Active when low**.
 - **A button fires more than once:** increase debounce from the default 30 ms.
+- **A parameter moves too slowly or too coarsely:** change **Clicks per full range** in the hardware settings. Parameters that declare their own step size ignore it.
+- **A parameter you expected is missing from the scroll:** its plugin marks that port as not shown on a user interface, so PiPedal will not let an encoder reach it either.
 - **No ADC channels:** enable the external ADC's Linux IIO driver; the Pi itself provides none.
 - **A potentiometer chatters:** increase smoothing and/or deadband.
 - **Mappings disappeared:** mappings are preset data; save the preset after editing and configure each preset that should use them.

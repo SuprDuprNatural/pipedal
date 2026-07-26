@@ -48,13 +48,13 @@ namespace pipedal
     };
 
     // Optional global roles for a conventional four-encoder controller. The
-    // role belongs to the physical encoder, while Parameter 1/2 assignments
-    // remain part of each preset.
+    // role belongs to the physical encoder. What Parameter 1 and Parameter 2
+    // currently edit follows the scroll position, which is part of the preset.
     enum class GpioEncoderRole : int32_t
     {
         None = 0,
         PresetBrowser = 1,
-        EffectSelector = 2,
+        ParameterScroll = 2,
         Parameter1 = 3,
         Parameter2 = 4
     };
@@ -120,6 +120,10 @@ namespace pipedal
     public:
         bool enabled_ = false;
         bool encoderRolesConfigured_ = false;
+        // Detents needed to move a continuous parameter across its whole range.
+        // Parameters that declare their own steps, and integer, toggled and
+        // enumerated parameters, use their declared resolution instead.
+        int32_t encoderStepsPerRange_ = 100;
         std::vector<GpioInputConfiguration> inputs_;
         GpioDisplaySettings display_;
 
@@ -162,6 +166,11 @@ namespace pipedal
     // A mapping is stored in the pedalboard, so the same physical controls can
     // do completely different things in different presets. Multiple mappings
     // may reference the same input.
+    //
+    // Encoders that hold a standard role handle their own turns; only their
+    // push buttons reach mappings. Everything else -- footswitches, maintained
+    // switches, analog controls, and encoders left unassigned -- is mapped
+    // here and nowhere else.
     class GpioBinding
     {
     public:
@@ -179,14 +188,6 @@ namespace pipedal
         float maxValue_ = 1.0f;
         float curve_ = 1.0f;
         float stepValue_ = 0.01f;
-
-        // If set, this mapping is one item in a list selected by the named
-        // encoder. Mappings with the same inputId/selectorInputId form a group.
-        std::string selectorInputId_;
-
-        // 0 is an advanced/free-form mapping. 1 and 2 are the standard
-        // Parameter 1/2 slots selected by the global Effect Selector role.
-        int32_t parameterSlot_ = 0;
 
         GpioActionType actionType() const { return static_cast<GpioActionType>(actionType_); }
         GpioBindingMode mode() const { return static_cast<GpioBindingMode>(mode_); }
@@ -291,10 +292,25 @@ namespace pipedal
         Tuner = 2
     };
 
+    // One parameter that the web interface would show a control for, somewhere
+    // in the current effect chain. The parameter encoder scrolls through these
+    // in chain order; the two parameter knobs edit the two currently shown.
+    class GpioParameter
+    {
+    public:
+        int64_t instanceId = -1;
+        std::string symbol;
+
+        bool operator==(const GpioParameter &other) const = default;
+    };
+
     class GpioDisplayControl
     {
     public:
         bool assigned = false;
+        // The two shown parameters are adjacent in one list spanning every
+        // effect, so each carries the effect it belongs to.
+        std::string effectName;
         std::string label;
         std::string value;
         float normalizedValue = 0.0f;
@@ -303,9 +319,10 @@ namespace pipedal
     class GpioDisplayDashboard
     {
     public:
-        std::string effectName;
         std::array<GpioDisplayControl, 2> controls;
         int32_t activeSlot = 0; // 0 = neither, otherwise 1 or 2.
+        int32_t scrollIndex = 0;
+        int32_t scrollPositions = 0; // 0 when the chain has no parameters.
     };
 
     // std::isfinite is not usable anywhere in this feature: PiPedal release

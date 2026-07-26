@@ -570,7 +570,7 @@ void PiPedalModel::Load()
                        : 0;
         });
     gpioManager->Configure(gpioSettings);
-    UpdateGpioDashboard(pedalboard.gpioBindings());
+    UpdateGpioDashboard();
 }
 
 IPiPedalModelSubscriber *PiPedalModel::GetNotificationSubscriber(int64_t clientId)
@@ -754,16 +754,17 @@ void PiPedalModel::SetControl(int64_t clientId, int64_t pedalItemId, const std::
 
     this->SetPresetChanged(clientId, true);
 
+    // A change from anywhere -- hardware, web interface, or a MIDI binding --
+    // refreshes the OLED when it is one of the two parameters on screen.
     bool updateDashboard = false;
-    std::vector<GpioBinding> bindings;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
-        updateDashboard = pedalItemId == gpioSelectedEffectId;
-        if (updateDashboard)
-            bindings = pedalboard.gpioBindings();
+        const GpioParameter changed{pedalItemId, symbol};
+        updateDashboard = gpioShownParameters[0] == changed ||
+                          gpioShownParameters[1] == changed;
     }
     if (updateDashboard)
-        UpdateGpioDashboard(bindings);
+        UpdateGpioDashboard();
 }
 
 void PiPedalModel::FireJackConfigurationChanged(const JackConfiguration &jackConfiguration)
@@ -803,6 +804,7 @@ void PiPedalModel::FirePedalboardChanged(int64_t clientId, bool loadAudioThread)
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
         subscribers = this->subscribers;
+        RemoveUnreachableGpioBindings();
 
         if (loadAudioThread)
         {
@@ -830,12 +832,13 @@ void PiPedalModel::FirePedalboardChanged(int64_t clientId, bool loadAudioThread)
             gpioManager->Refresh();
         }
     }
-    UpdateGpioDashboard(pedalboard.gpioBindings());
+    UpdateGpioDashboard();
 }
 void PiPedalModel::SetPedalboard(int64_t clientId, Pedalboard &pedalboard)
 {
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
+        CarryGpioScrollForward(pedalboard);
         this->pedalboard = pedalboard;
         UpdateDefaults(&this->pedalboard);
     }
@@ -909,6 +912,7 @@ void PiPedalModel::UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalbo
         // the pedalboard must be a manipualted instance of the current Lv2Pedalboard.
 
         UpdateVst3Settings(pedalboard);
+        CarryGpioScrollForward(pedalboard);
 
         Lv2PedalboardErrorList errorMessages;
         std::shared_ptr<Lv2Pedalboard> lv2Pedalboard{
@@ -1507,9 +1511,9 @@ void PiPedalModel::LoadPreset(int64_t clientId, int64_t instanceId)
     {
         this->pedalboard = storage.GetCurrentPreset();
         UpdateDefaults(&this->pedalboard);
+        // The scroll position travels with the preset; only the browse
+        // candidate is per-session state.
         gpioPendingPresetId = -1;
-        gpioSelectedEffectId = -1;
-        gpioSelectorIndices.clear();
 
         this->hasPresetChanged = false; // no fire.
         this->FirePedalboardChanged(clientId);
@@ -3149,12 +3153,10 @@ void PiPedalModel::SetGpioSettings(const GpioSettings &settings)
     storage.SetGpioSettings(settings);
     gpioSettings = settings;
     gpioPendingPresetId = -1;
-    gpioSelectedEffectId = -1;
-    gpioSelectorIndices.clear();
     if (gpioManager)
     {
         gpioManager->Configure(gpioSettings);
-        UpdateGpioDashboard(pedalboard.gpioBindings());
+        UpdateGpioDashboard();
     }
     FireGpioSettingsChanged();
 }
@@ -3194,9 +3196,7 @@ void PiPedalModel::SetGpioBindings(int64_t clientId, const std::vector<GpioBindi
             // file and then the OLED. See IsFiniteGpioValue.
             !IsFiniteGpioValue(binding.minValue_) || !IsFiniteGpioValue(binding.maxValue_) ||
             !IsFiniteGpioValue(binding.curve_) || binding.curve_ < 0.05f || binding.curve_ > 20.0f ||
-            !IsFiniteGpioValue(binding.stepValue_) || binding.stepValue_ <= 0.0f || binding.stepValue_ > 1000000.0f ||
-            binding.parameterSlot_ < 0 || binding.parameterSlot_ > 2 ||
-            (!binding.selectorInputId_.empty() && binding.selectorInputId_ == binding.inputId_))
+            !IsFiniteGpioValue(binding.stepValue_) || binding.stepValue_ <= 0.0f || binding.stepValue_ > 1000000.0f)
         {
             throw std::invalid_argument("Invalid GPIO mapping.");
         }
@@ -3205,8 +3205,6 @@ void PiPedalModel::SetGpioBindings(int64_t clientId, const std::vector<GpioBindi
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
         pedalboard.gpioBindings(bindings);
-        gpioSelectedEffectId = -1;
-        gpioSelectorIndices.clear();
     }
     FirePedalboardChanged(clientId, false);
     SetPresetChanged(clientId, true, false);
@@ -3249,11 +3247,98 @@ void PiPedalModel::ShowGpioWorkflowMessage(
     gpioManager->ShowDisplayMessage(message);
 }
 
-std::vector<int64_t> PiPedalModel::GetGpioControllableEffects(
-    const std::vector<GpioBinding> &bindings)
+// A port the web interface hides has no control the user can reach, so a
+// hardware encoder must not offer it either.
+static bool IsGpioVisibleParameter(const Lv2PortInfo &port)
+{
+    if (!port.is_control_port() || !port.is_input() || port.not_on_gui())
+        return false;
+    if (port.is_bypass() || port.symbol() == "bypass" || port.symbol() == "Bypass")
+        return false;
+    return port.name() != "bypass" && port.name() != "Bypass";
+}
+
+// The inverse of Lv2PortInfo::rangeToValue: a 0..1 position on the port's own
+// scale, so that a detent moves a logarithmic control by a constant ratio.
+static float GpioValueToRange(const Lv2PortInfo &port, float value)
+{
+    const float minimum = port.min_value();
+    const float maximum = port.max_value();
+    if (port.is_logarithmic() && minimum > 0.0f && maximum > 0.0f && maximum != minimum)
+    {
+        return std::log(std::max(value, minimum) / minimum) /
+               std::log(maximum / minimum);
+    }
+    if (maximum == minimum)
+        return 0.0f;
+    return (value - minimum) / (maximum - minimum);
+}
+
+std::vector<GpioParameter> PiPedalModel::GetGpioParameters()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
+    std::vector<GpioParameter> result;
+    for (auto *item : pedalboard.GetAllPlugins())
+    {
+        if (item->isEmpty() || item->isSplit())
+            continue;
+        auto plugin = GetPluginInfo(item->uri_);
+        if (!plugin)
+            continue;
+        for (const auto &port : plugin->ports())
+        {
+            if (port && IsGpioVisibleParameter(*port))
+                result.push_back(GpioParameter{item->instanceId_, port->symbol()});
+        }
+    }
+    return result;
+}
+
+// The window always shows two adjacent parameters, so the last scroll position
+// is the one whose second parameter is the last in the list.
+static size_t GpioScrollPositions(size_t parameterCount)
+{
+    return parameterCount <= 2 ? 1 : parameterCount - 1;
+}
+
+size_t PiPedalModel::GetGpioScrollIndex(const std::vector<GpioParameter> &parameters)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (parameters.empty())
+        return 0;
+    const GpioParameter anchor{
+        pedalboard.gpioScrollInstanceId(), pedalboard.gpioScrollSymbol()};
+    auto found = std::find(parameters.begin(), parameters.end(), anchor);
+    if (found == parameters.end())
+        return 0;
+    return std::min(
+        static_cast<size_t>(std::distance(parameters.begin(), found)),
+        GpioScrollPositions(parameters.size()) - 1);
+}
+
+void PiPedalModel::SetGpioScrollIndex(
+    const std::vector<GpioParameter> &parameters, size_t index)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (index >= parameters.size())
+        return;
+    // Stored as the first shown parameter rather than an index, so that adding
+    // or reordering effects moves the window with the parameter the player
+    // chose. Deliberately does not mark the preset changed or notify clients:
+    // this is a hardware view position, like the selected plugin.
+    pedalboard.gpioScrollInstanceId(parameters[index].instanceId);
+    pedalboard.gpioScrollSymbol(parameters[index].symbol);
+}
+
+// An encoder holding a standard role handles its own turns, and the preset and
+// parameter-scroll encoders also use their own push buttons. Mappings on those
+// events can never fire, so drop them rather than listing mappings in the web
+// interface that quietly do nothing. Presets written by the earlier workflow
+// are full of them.
+void PiPedalModel::RemoveUnreachableGpioBindings()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     auto roleForInput = [this](const std::string &inputId)
     {
         for (const auto &input : gpioSettings.inputs_)
@@ -3264,38 +3349,125 @@ std::vector<int64_t> PiPedalModel::GetGpioControllableEffects(
         return GpioEncoderRole::None;
     };
 
-    std::set<int64_t> mappedEffectIds;
+    const auto &bindings = pedalboard.gpioBindings();
+    auto isUnreachable = [&](const GpioBinding &binding)
+    {
+        const GpioEncoderRole role = roleForInput(binding.inputId_);
+        if (role == GpioEncoderRole::None)
+            return false;
+        return binding.eventType() == GpioBindingEventType::EncoderTurn ||
+               role == GpioEncoderRole::PresetBrowser ||
+               role == GpioEncoderRole::ParameterScroll;
+    };
+    if (std::none_of(bindings.begin(), bindings.end(), isUnreachable))
+        return;
+
+    std::vector<GpioBinding> kept;
+    kept.reserve(bindings.size());
     for (const auto &binding : bindings)
     {
-        if (!binding.enabled_ ||
-            binding.actionType() != GpioActionType::Control ||
-            binding.eventType() != GpioBindingEventType::EncoderTurn)
-            continue;
-        GpioEncoderRole inputRole = roleForInput(binding.inputId_);
-        if (binding.parameterSlot_ != 0 ||
-            inputRole == GpioEncoderRole::Parameter1 ||
-            inputRole == GpioEncoderRole::Parameter2)
-        {
-            mappedEffectIds.insert(binding.instanceId_);
-        }
+        if (!isUnreachable(binding))
+            kept.push_back(binding);
     }
+    pedalboard.gpioBindings(std::move(kept));
+}
 
-    std::vector<int64_t> result;
-    for (auto *item : pedalboard.GetAllPlugins())
+void PiPedalModel::CarryGpioScrollForward(Pedalboard &pedalboard)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (pedalboard.gpioScrollInstanceId() == -1 && pedalboard.gpioScrollSymbol().empty())
     {
-        if (!item->isEmpty() && !item->isSplit() &&
-            mappedEffectIds.contains(item->instanceId_))
+        pedalboard.gpioScrollInstanceId(this->pedalboard.gpioScrollInstanceId());
+        pedalboard.gpioScrollSymbol(this->pedalboard.gpioScrollSymbol());
+    }
+}
+
+// One detent moves a parameter by its own natural step: between declared scale
+// points, one unit for integers, one declared step where a port declares them,
+// and otherwise a configurable fraction of the whole range.
+void PiPedalModel::AdjustGpioParameter(const GpioParameter &parameter, int32_t delta)
+{
+    if (delta == 0)
+        return;
+
+    std::shared_ptr<Lv2PortInfo> port;
+    float currentValue = 0.0f;
+    int32_t stepsPerRange = 100;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex);
+        stepsPerRange = gpioSettings.encoderStepsPerRange_;
+        auto *item = pedalboard.GetItem(parameter.instanceId);
+        if (!item)
+            return;
+        auto plugin = GetPluginInfo(item->uri_);
+        if (!plugin)
+            return;
+        for (const auto &candidate : plugin->ports())
         {
-            result.push_back(item->instanceId_);
+            if (candidate && candidate->symbol() == parameter.symbol)
+            {
+                port = candidate;
+                break;
+            }
+        }
+        if (!port)
+            return;
+        currentValue = port->default_value();
+        if (auto *control = item->GetControlValue(parameter.symbol))
+            currentValue = control->value();
+    }
+    // Not std::isfinite: release builds are -ffast-math. See IsFiniteGpioValue.
+    if (!IsFiniteGpioValue(currentValue))
+        currentValue = port->min_value();
+
+    float targetValue;
+    std::vector<float> scalePointValues;
+    if (port->enumeration_property())
+    {
+        for (const auto &point : port->scale_points())
+        {
+            if (IsFiniteGpioValue(point.value()))
+                scalePointValues.push_back(point.value());
         }
     }
-    return result;
+    if (scalePointValues.size() >= 2)
+    {
+        std::sort(scalePointValues.begin(), scalePointValues.end());
+        scalePointValues.erase(
+            std::unique(scalePointValues.begin(), scalePointValues.end()),
+            scalePointValues.end());
+        auto nearest = std::min_element(
+            scalePointValues.begin(), scalePointValues.end(),
+            [currentValue](float left, float right)
+            { return std::abs(left - currentValue) < std::abs(right - currentValue); });
+        int64_t index = std::distance(scalePointValues.begin(), nearest) + delta;
+        index = std::clamp<int64_t>(
+            index, 0, static_cast<int64_t>(scalePointValues.size()) - 1);
+        targetValue = scalePointValues[static_cast<size_t>(index)];
+    }
+    else
+    {
+        float steps;
+        if (port->range_steps() >= 2)
+            steps = static_cast<float>(port->range_steps() - 1);
+        else if (port->toggled_property())
+            steps = 1.0f;
+        else if (port->integer_property())
+            steps = std::max(1.0f, std::round(port->max_value() - port->min_value()));
+        else
+            steps = static_cast<float>(std::max(4, stepsPerRange));
+        float range = GpioValueToRange(*port, currentValue) +
+                      static_cast<float>(delta) / steps;
+        targetValue = port->rangeToValue(std::clamp(range, 0.0f, 1.0f));
+    }
+    if (!IsFiniteGpioValue(targetValue))
+        return;
+    SetControl(-1, parameter.instanceId, parameter.symbol, targetValue);
 }
 
 bool PiPedalModel::HandleGpioRoleEvent(
     const GpioInputEvent &event,
-    GpioEncoderRole role,
-    const std::vector<GpioBinding> &bindings)
+    GpioEncoderRole role)
 {
     if (role == GpioEncoderRole::None)
         return false;
@@ -3374,7 +3546,7 @@ bool PiPedalModel::HandleGpioRoleEvent(
         return true;
     }
 
-    if (role == GpioEncoderRole::EffectSelector)
+    if (role == GpioEncoderRole::ParameterScroll)
     {
         if (event.eventType == GpioInputEventType::EncoderButton && event.risingEdge)
         {
@@ -3387,37 +3559,25 @@ bool PiPedalModel::HandleGpioRoleEvent(
             return true;
         }
 
-        auto effects = GetGpioControllableEffects(bindings);
-        if (effects.empty())
-        {
-            if (event.eventType == GpioInputEventType::EncoderTurn ||
-                (event.eventType == GpioInputEventType::EncoderButton && event.risingEdge))
-            {
-                ShowGpioWorkflowMessage("EFFECT SELECT", "NO PARAMETERS", "");
-            }
-            return true;
-        }
-
         if (event.eventType == GpioInputEventType::EncoderTurn && event.delta != 0)
         {
+            auto parameters = GetGpioParameters();
+            if (parameters.empty())
             {
-                std::lock_guard<std::recursive_mutex> lock(mutex);
-                auto found = std::find(effects.begin(), effects.end(), gpioSelectedEffectId);
-                size_t selected;
-                if (found == effects.end())
-                    selected = event.delta > 0 ? effects.size() - 1 : 0;
-                else
-                    selected = static_cast<size_t>(std::distance(effects.begin(), found));
-                if (event.delta > 0)
-                    selected = (selected + 1) % effects.size();
-                else
-                    selected = selected == 0 ? effects.size() - 1 : selected - 1;
-                gpioSelectedEffectId = effects[selected];
+                ShowGpioWorkflowMessage("PARAMETERS", "NONE IN THIS PRESET", "");
+                return true;
             }
+            const int64_t positions =
+                static_cast<int64_t>(GpioScrollPositions(parameters.size()));
+            int64_t index =
+                (static_cast<int64_t>(GetGpioScrollIndex(parameters)) + event.delta) %
+                positions;
+            if (index < 0)
+                index += positions;
+            SetGpioScrollIndex(parameters, static_cast<size_t>(index));
             if (gpioManager)
                 gpioManager->ClearDisplayMessage();
-            UpdateGpioDashboard(bindings, 0, true);
-            return true;
+            UpdateGpioDashboard(0, true);
         }
         return true;
     }
@@ -3425,79 +3585,26 @@ bool PiPedalModel::HandleGpioRoleEvent(
     if ((role == GpioEncoderRole::Parameter1 || role == GpioEncoderRole::Parameter2) &&
         event.eventType == GpioInputEventType::EncoderTurn)
     {
-        auto effects = GetGpioControllableEffects(bindings);
-        if (effects.empty())
+        if (event.delta == 0)
+            return true;
+        const int32_t slot = role == GpioEncoderRole::Parameter1 ? 1 : 2;
+        auto parameters = GetGpioParameters();
+        const size_t index = GetGpioScrollIndex(parameters) + slot - 1;
+        if (index >= parameters.size())
         {
-            ShowGpioWorkflowMessage("PARAMETER", "NO PARAMETERS", "");
+            ShowGpioWorkflowMessage(
+                "PARAMETER",
+                parameters.empty() ? "NONE IN THIS PRESET" : "NO SECOND PARAMETER",
+                "");
             return true;
         }
-
-        int32_t slot = role == GpioEncoderRole::Parameter1 ? 1 : 2;
-        int64_t selectedId;
-        {
-            std::lock_guard<std::recursive_mutex> lock(mutex);
-            if (std::find(effects.begin(), effects.end(), gpioSelectedEffectId) == effects.end())
-                gpioSelectedEffectId = effects.front();
-            selectedId = gpioSelectedEffectId;
-        }
-
-        bool executed = false;
-        for (const auto &binding : bindings)
-        {
-            bool legacyRoleBinding = binding.parameterSlot_ == 0 &&
-                                     binding.inputId_ == event.inputId;
-            if (binding.enabled_ &&
-                binding.actionType() == GpioActionType::Control &&
-                binding.eventType() == GpioBindingEventType::EncoderTurn &&
-                binding.instanceId_ == selectedId &&
-                (binding.parameterSlot_ == slot || legacyRoleBinding))
-            {
-                ExecuteGpioBinding(binding, event);
-                executed = true;
-            }
-        }
-        if (!executed)
-        {
-            std::string name;
-            {
-                std::lock_guard<std::recursive_mutex> lock(mutex);
-                if (auto *item = pedalboard.GetItem(selectedId))
-                    name = item->title_.empty() ? item->pluginName_ : item->title_;
-            }
-            ShowGpioWorkflowMessage(
-                name,
-                slot == 1 ? "PARAMETER 1" : "PARAMETER 2",
-                "NOT ASSIGNED");
-        }
-        else
-        {
-            UpdateGpioDashboard(bindings, slot, true);
-        }
+        AdjustGpioParameter(parameters[index], event.delta);
+        UpdateGpioDashboard(slot, true);
         return true;
     }
 
     // Parameter encoder buttons remain available to advanced mappings.
     return false;
-}
-
-size_t PiPedalModel::AdvanceGpioSelector(
-    const std::string &key, int32_t delta, size_t groupSize)
-{
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    int64_t selected = static_cast<int64_t>(gpioSelectorIndices[key]) + delta;
-    selected %= static_cast<int64_t>(groupSize);
-    if (selected < 0)
-        selected += static_cast<int64_t>(groupSize);
-    gpioSelectorIndices[key] = static_cast<size_t>(selected);
-    return static_cast<size_t>(selected);
-}
-
-size_t PiPedalModel::GetGpioSelector(const std::string &key, size_t groupSize)
-{
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    // find() rather than operator[]: reading a selector must not insert.
-    auto found = gpioSelectorIndices.find(key);
-    return found == gpioSelectorIndices.end() ? 0 : found->second % groupSize;
 }
 
 void PiPedalModel::HandleGpioInputEvent(const GpioInputEvent &event)
@@ -3517,69 +3624,16 @@ void PiPedalModel::HandleGpioInputEvent(const GpioInputEvent &event)
         }
     }
 
-    if (HandleGpioRoleEvent(event, inputRole, bindings))
+    if (HandleGpioRoleEvent(event, inputRole))
         return;
 
-    auto groupKey = [](const GpioBinding &binding)
+    for (const auto &binding : bindings)
     {
-        return binding.inputId_ + "\n" + binding.selectorInputId_;
-    };
-
-    // Turning an encoder used as a selector cycles every target group that
-    // names it. The turn is consumed; its push button remains independently
-    // assignable.
-    if (event.eventType == GpioInputEventType::EncoderTurn && event.delta != 0)
-    {
-        std::set<std::string> handledGroups;
-        bool handled = false;
-        for (const auto &binding : bindings)
+        if (binding.enabled_ && binding.inputId_ == event.inputId &&
+            static_cast<GpioInputEventType>(binding.eventType_) == event.eventType)
         {
-            if (!binding.enabled_ || binding.selectorInputId_ != event.inputId ||
-                binding.eventType() != GpioBindingEventType::EncoderTurn)
-                continue;
-            std::string key = groupKey(binding);
-            if (!handledGroups.insert(key).second) continue;
-            std::vector<const GpioBinding *> group;
-            for (const auto &candidate : bindings)
-            {
-                if (candidate.enabled_ && candidate.inputId_ == binding.inputId_ &&
-                    candidate.selectorInputId_ == binding.selectorInputId_ &&
-                    candidate.eventType() == binding.eventType())
-                    group.push_back(&candidate);
-            }
-            if (group.empty()) continue;
-            size_t selected = AdvanceGpioSelector(key, event.delta, group.size());
-            ShowGpioBindingValue(*group[selected], std::nullopt, true);
-            handled = true;
+            ExecuteGpioBinding(binding, event);
         }
-        if (handled) return;
-    }
-
-    auto expectedEvent = [](const GpioBinding &binding)
-    {
-        return static_cast<GpioInputEventType>(binding.eventType_);
-    };
-    for (size_t bindingIndex = 0; bindingIndex < bindings.size(); ++bindingIndex)
-    {
-        const auto &binding = bindings[bindingIndex];
-        if (!binding.enabled_ || binding.inputId_ != event.inputId || expectedEvent(binding) != event.eventType)
-            continue;
-        if (!binding.selectorInputId_.empty())
-        {
-            std::vector<size_t> group;
-            for (size_t i = 0; i < bindings.size(); ++i)
-            {
-                const auto &candidate = bindings[i];
-                if (candidate.enabled_ && candidate.inputId_ == binding.inputId_ &&
-                    candidate.selectorInputId_ == binding.selectorInputId_ &&
-                    candidate.eventType() == binding.eventType())
-                    group.push_back(i);
-            }
-            if (group.empty()) continue;
-            size_t selected = GetGpioSelector(groupKey(binding), group.size());
-            if (group[selected] != bindingIndex) continue;
-        }
-        ExecuteGpioBinding(binding, event);
     }
 }
 
@@ -3788,58 +3842,78 @@ void PiPedalModel::ExecuteGpioBinding(const GpioBinding &binding, const GpioInpu
         }
         SetControl(-1, binding.instanceId_, binding.symbol_, targetValue);
     }
-    // Standard Parameter 1/2 mappings update the persistent two-knob
-    // dashboard as a group in HandleGpioRoleEvent. Advanced mappings retain
-    // the existing temporary single-value overlay.
-    if (binding.parameterSlot_ == 0)
-        ShowGpioBindingValue(binding, targetValue);
+    ShowGpioBindingValue(binding, targetValue);
 }
 
+// Overrides are supplied by advanced mappings, which carry their own range and
+// step. A scrolled parameter has none, and uses the port's own scale.
 GpioDisplayControl PiPedalModel::BuildGpioDisplayControl(
-    const GpioBinding &binding,
+    int64_t instanceId,
+    const std::string &symbol,
     std::optional<float> suppliedValue,
-    std::string *effectName)
+    std::optional<float> minimumOverride,
+    std::optional<float> maximumOverride,
+    std::optional<float> stepOverride)
 {
     GpioDisplayControl result;
     result.assigned = true;
-    result.label = binding.symbol_;
+    result.label = symbol;
     float value = suppliedValue.value_or(0.0f);
+    float portMinimum = 0.0f;
+    float portMaximum = 1.0f;
+    float portStep = 0.01f;
     std::vector<Lv2ScalePoint> displayScalePoints;
     Units displayUnits = Units::none;
     std::string displayCustomUnits;
     bool hasPortInfo = false;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
-        if (binding.instanceId_ == Pedalboard::START_CONTROL_ID)
+        if (instanceId == Pedalboard::START_CONTROL_ID)
         {
-            if (effectName) *effectName = "INPUT";
+            result.effectName = "INPUT";
             result.label = "LEVEL";
+            portMinimum = -60.0f;
+            portMaximum = 12.0f;
+            portStep = 1.0f;
             if (!suppliedValue) value = pedalboard.input_volume_db();
         }
-        else if (binding.instanceId_ == Pedalboard::END_CONTROL_ID)
+        else if (instanceId == Pedalboard::END_CONTROL_ID)
         {
-            if (effectName) *effectName = "OUTPUT";
+            result.effectName = "OUTPUT";
             result.label = "LEVEL";
+            portMinimum = -60.0f;
+            portMaximum = 12.0f;
+            portStep = 1.0f;
             if (!suppliedValue) value = pedalboard.output_volume_db();
         }
-        else if (auto *item = pedalboard.GetItem(binding.instanceId_))
+        else if (auto *item = pedalboard.GetItem(instanceId))
         {
-            if (effectName)
-                *effectName = item->title_.empty() ? item->pluginName_ : item->title_;
+            result.effectName = item->title_.empty() ? item->pluginName_ : item->title_;
             if (!suppliedValue)
-                if (auto *control = item->GetControlValue(binding.symbol_)) value = control->value();
+                if (auto *control = item->GetControlValue(symbol)) value = control->value();
             auto plugin = GetPluginInfo(item->uri_);
             if (plugin)
             {
                 for (const auto &port : plugin->ports())
                 {
-                    if (port->symbol() == binding.symbol_)
+                    if (port && port->symbol() == symbol)
                     {
                         hasPortInfo = true;
                         displayScalePoints = port->scale_points();
                         displayUnits = port->units();
                         displayCustomUnits = port->custom_units();
                         result.label = port->name();
+                        portMinimum = port->min_value();
+                        portMaximum = port->max_value();
+                        const float portRange = portMaximum - portMinimum;
+                        portStep =
+                            port->range_steps() >= 2
+                                ? std::abs(portRange) / (port->range_steps() - 1)
+                            : port->integer_property() || port->toggled_property() ||
+                                    port->enumeration_property()
+                                ? 1.0f
+                                : std::abs(portRange) /
+                                      std::max(4, gpioSettings.encoderStepsPerRange_);
                         break;
                     }
                 }
@@ -3848,10 +3922,10 @@ GpioDisplayControl PiPedalModel::BuildGpioDisplayControl(
     }
 
     const float minimum =
-        ResolveGpioDisplayValue(binding.minValue_, 0.0f, 0.0f);
-    const float maximum =
-        ResolveGpioDisplayValue(binding.maxValue_, minimum + 1.0f, minimum + 1.0f);
-    float step = ResolveGpioDisplayValue(binding.stepValue_, 0.01f, 0.01f);
+        ResolveGpioDisplayValue(minimumOverride.value_or(portMinimum), 0.0f, 0.0f);
+    const float maximum = ResolveGpioDisplayValue(
+        maximumOverride.value_or(portMaximum), minimum + 1.0f, minimum + 1.0f);
+    float step = ResolveGpioDisplayValue(stepOverride.value_or(portStep), 0.01f, 0.01f);
     if (step <= 0.0f) step = 0.01f;
     value = ResolveGpioDisplayValue(suppliedValue, value, minimum);
     bool usedScalePoint = false;
@@ -3879,8 +3953,8 @@ GpioDisplayControl PiPedalModel::BuildGpioDisplayControl(
                                     ? displayCustomUnits : UnitsToString(displayUnits);
             if (!units.empty() && units != "none" && units != "unknown") stream << " " << units;
         }
-        else if (binding.instanceId_ == Pedalboard::START_CONTROL_ID ||
-                 binding.instanceId_ == Pedalboard::END_CONTROL_ID)
+        else if (instanceId == Pedalboard::START_CONTROL_ID ||
+                 instanceId == Pedalboard::END_CONTROL_ID)
         {
             stream << " dB";
         }
@@ -3896,65 +3970,38 @@ GpioDisplayControl PiPedalModel::BuildGpioDisplayControl(
     return result;
 }
 
-void PiPedalModel::UpdateGpioDashboard(
-    const std::vector<GpioBinding> &bindings,
-    int32_t activeSlot,
-    bool temporary)
+void PiPedalModel::UpdateGpioDashboard(int32_t activeSlot, bool temporary)
 {
     if (!gpioManager)
         return;
 
+    auto parameters = GetGpioParameters();
     GpioDisplayDashboard dashboard;
-    auto effects = GetGpioControllableEffects(bindings);
-    if (effects.empty())
+    std::array<GpioParameter, 2> shown;
+    if (!parameters.empty())
     {
-        dashboard.effectName = "NO PARAMETER MAPS";
-        gpioManager->ShowControlDashboard(dashboard);
-        return;
+        const size_t index = GetGpioScrollIndex(parameters);
+        dashboard.scrollIndex = static_cast<int32_t>(index);
+        dashboard.scrollPositions =
+            static_cast<int32_t>(GpioScrollPositions(parameters.size()));
+        for (size_t slot = 0; slot < 2; ++slot)
+        {
+            if (index + slot >= parameters.size())
+                break;
+            shown[slot] = parameters[index + slot];
+            dashboard.controls[slot] = BuildGpioDisplayControl(
+                shown[slot].instanceId, shown[slot].symbol, std::nullopt);
+        }
+        dashboard.activeSlot =
+            activeSlot >= 1 && activeSlot <= 2 &&
+                    dashboard.controls[activeSlot - 1].assigned
+                ? activeSlot
+                : 0;
     }
-
-    int64_t selectedEffect;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
-        if (std::find(effects.begin(), effects.end(), gpioSelectedEffectId) ==
-            effects.end())
-        {
-            gpioSelectedEffectId = effects.front();
-        }
-        selectedEffect = gpioSelectedEffectId;
-        if (auto *item = pedalboard.GetItem(selectedEffect))
-            dashboard.effectName =
-                item->title_.empty() ? item->pluginName_ : item->title_;
+        gpioShownParameters = shown;
     }
-
-    for (int32_t slot = 1; slot <= 2; ++slot)
-    {
-        auto found = std::find_if(
-            bindings.begin(), bindings.end(),
-            [selectedEffect, slot](const GpioBinding &binding)
-            {
-                return binding.enabled_ &&
-                       binding.parameterSlot_ == slot &&
-                       binding.instanceId_ == selectedEffect &&
-                       binding.actionType() == GpioActionType::Control &&
-                       binding.eventType() == GpioBindingEventType::EncoderTurn;
-            });
-        if (found != bindings.end())
-        {
-            std::string effectName;
-            dashboard.controls[slot - 1] = BuildGpioDisplayControl(
-                *found,
-                std::nullopt,
-                &effectName);
-            if (dashboard.effectName.empty())
-                dashboard.effectName = effectName;
-        }
-    }
-    dashboard.activeSlot =
-        activeSlot >= 1 && activeSlot <= 2 &&
-                dashboard.controls[activeSlot - 1].assigned
-            ? activeSlot
-            : 0;
     if (temporary)
         gpioManager->ShowTemporaryControlDashboard(dashboard);
     else
@@ -3963,12 +4010,11 @@ void PiPedalModel::UpdateGpioDashboard(
 
 void PiPedalModel::ShowGpioBindingValue(
     const GpioBinding &binding,
-    std::optional<float> suppliedValue,
-    bool selecting)
+    std::optional<float> suppliedValue)
 {
     if (!gpioManager) return;
     GpioDisplayMessage message;
-    message.title = selecting ? "SELECT TARGET" : "PIPEDAL";
+    message.title = "PIPEDAL";
     message.label = binding.symbol_;
 
     if (binding.actionType() == GpioActionType::Bypass)
@@ -3989,12 +4035,12 @@ void PiPedalModel::ShowGpioBindingValue(
         return;
     }
 
-    std::string effectName;
-    GpioDisplayControl control =
-        BuildGpioDisplayControl(binding, suppliedValue, &effectName);
-    if (!effectName.empty() && !selecting)
-        message.title = effectName;
-    message.label = selecting ? "SELECT " + control.label : control.label;
+    GpioDisplayControl control = BuildGpioDisplayControl(
+        binding.instanceId_, binding.symbol_, suppliedValue,
+        binding.minValue_, binding.maxValue_, binding.stepValue_);
+    if (!control.effectName.empty())
+        message.title = control.effectName;
+    message.label = control.label;
     message.value = control.value;
     message.normalizedValue = control.normalizedValue;
     message.hasNormalizedValue = true;

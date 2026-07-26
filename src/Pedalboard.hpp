@@ -237,6 +237,12 @@ namespace pipedal
         // configuration itself is global and is stored separately.
         std::vector<GpioBinding> gpioBindings_;
 
+        // Where the hardware parameter encoder is scrolled to, held as the
+        // first shown parameter rather than an index so that it survives
+        // reordering or editing of the effect chain.
+        int64_t gpioScrollInstanceId_ = -1;
+        std::string gpioScrollSymbol_;
+
 
     public:
 
@@ -276,6 +282,8 @@ namespace pipedal
         GETTER_SETTER(selectedSnapshot)
         GETTER_SETTER(selectedPlugin)
         GETTER_SETTER_VEC(gpioBindings)
+        GETTER_SETTER(gpioScrollInstanceId)
+        GETTER_SETTER_REF(gpioScrollSymbol)
 
         DECLARE_JSON_MAP(Pedalboard);
 

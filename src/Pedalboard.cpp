@@ -554,6 +554,8 @@ JSON_MAP_BEGIN(Pedalboard)
     JSON_MAP_REFERENCE(Pedalboard,selectedSnapshot)
     JSON_MAP_REFERENCE(Pedalboard,selectedPlugin)
     JSON_MAP_REFERENCE(Pedalboard,gpioBindings)
+    JSON_MAP_REFERENCE(Pedalboard,gpioScrollInstanceId)
+    JSON_MAP_REFERENCE(Pedalboard,gpioScrollSymbol)
 JSON_MAP_END()
 
 JSON_MAP_BEGIN(SnapshotValue)

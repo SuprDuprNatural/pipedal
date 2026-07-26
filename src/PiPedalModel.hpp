@@ -41,6 +41,7 @@
 #include "AtomConverter.hpp"
 #include "FileEntry.hpp"
 #include "ChannelRouterSettings.hpp"
+#include <array>
 #include <unordered_map>
 #include "Tone3000Downloader.hpp"
 #include "Uri.hpp"
@@ -157,37 +158,37 @@ namespace pipedal
 
         GpioSettings gpioSettings;
         std::unique_ptr<GpioManager> gpioManager;
-        // Written from the Post dispatch thread while preset, binding and
-        // hardware-settings changes clear it from socket threads, so every
-        // access goes through the locked accessors below.
-        std::unordered_map<std::string, size_t> gpioSelectorIndices;
-        size_t AdvanceGpioSelector(const std::string &key, int32_t delta, size_t groupSize);
-        size_t GetGpioSelector(const std::string &key, size_t groupSize);
         int64_t gpioPendingPresetId = -1;
-        int64_t gpioSelectedEffectId = -1;
+        // The two parameters currently on the OLED. Written from the Post
+        // dispatch thread and read whenever a control changes, so both go
+        // through the model mutex.
+        std::array<GpioParameter, 2> gpioShownParameters;
         void HandleGpioInputEvent(const GpioInputEvent &event);
-        bool HandleGpioRoleEvent(
-            const GpioInputEvent &event,
-            GpioEncoderRole role,
-            const std::vector<GpioBinding> &bindings);
-        std::vector<int64_t> GetGpioControllableEffects(const std::vector<GpioBinding> &bindings);
+        bool HandleGpioRoleEvent(const GpioInputEvent &event, GpioEncoderRole role);
+        // Every parameter the web interface would show a control for, in chain
+        // order. This is what the parameter encoder scrolls through.
+        std::vector<GpioParameter> GetGpioParameters();
+        size_t GetGpioScrollIndex(const std::vector<GpioParameter> &parameters);
+        void SetGpioScrollIndex(const std::vector<GpioParameter> &parameters, size_t index);
+        // A pedalboard supplied by a client carries no scroll position, so keep
+        // the one the hardware is actually on.
+        void CarryGpioScrollForward(Pedalboard &pedalboard);
+        void RemoveUnreachableGpioBindings();
+        void AdjustGpioParameter(const GpioParameter &parameter, int32_t delta);
         void ShowGpioWorkflowMessage(
             const std::string &title,
             const std::string &label,
             const std::string &value);
         GpioDisplayControl BuildGpioDisplayControl(
-            const GpioBinding &binding,
+            int64_t instanceId,
+            const std::string &symbol,
             std::optional<float> value,
-            std::string *effectName);
-        void UpdateGpioDashboard(
-            const std::vector<GpioBinding> &bindings,
-            int32_t activeSlot = 0,
-            bool temporary = false);
+            std::optional<float> minimumOverride = std::nullopt,
+            std::optional<float> maximumOverride = std::nullopt,
+            std::optional<float> stepOverride = std::nullopt);
+        void UpdateGpioDashboard(int32_t activeSlot = 0, bool temporary = false);
         void ExecuteGpioBinding(const GpioBinding &binding, const GpioInputEvent &event);
-        void ShowGpioBindingValue(
-            const GpioBinding &binding,
-            std::optional<float> value,
-            bool selecting = false);
+        void ShowGpioBindingValue(const GpioBinding &binding, std::optional<float> value);
         void FireGpioSettingsChanged();
         void FireGpioInputStatusChanged(const GpioInputStatus &status);
 

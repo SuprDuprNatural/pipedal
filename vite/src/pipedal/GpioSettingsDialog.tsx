@@ -64,11 +64,11 @@ function inputTypeName(inputType: GpioInputType): string {
 
 function encoderRoleName(role: GpioEncoderRole): string {
     switch (role) {
-        case GpioEncoderRole.None: return "Advanced / unassigned";
+        case GpioEncoderRole.None: return "Unassigned — free for mappings";
         case GpioEncoderRole.PresetBrowser: return "Browse presets; press to load";
-        case GpioEncoderRole.EffectSelector: return "Select effect; press to change OLED view";
-        case GpioEncoderRole.Parameter1: return "Selected effect — parameter 1";
-        case GpioEncoderRole.Parameter2: return "Selected effect — parameter 2";
+        case GpioEncoderRole.ParameterScroll: return "Scroll parameters; press to change OLED view";
+        case GpioEncoderRole.Parameter1: return "Change the left shown parameter";
+        case GpioEncoderRole.Parameter2: return "Change the right shown parameter";
     }
 }
 
@@ -186,7 +186,7 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                 <Box sx={{ flex: 1 }}>
                                     <Typography variant="subtitle1">Enable hardware inputs</Typography>
                                     <Typography variant="body2" color="text.secondary">
-                                        Encoder roles are global. The two parameter assignments are selected separately in each preset's Hardware view.
+                                        Encoder roles are global. Which two parameters the knobs edit follows the scroll position, which is saved with each preset.
                                     </Typography>
                                 </Box>
                                 <Switch checked={settings.enabled}
@@ -200,12 +200,30 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
 
                         <Card variant="outlined">
                             <CardContent>
+                                <Typography variant="subtitle1">Parameter knob resolution</Typography>
+                                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                                    Clicks needed to take a continuous parameter from its minimum to its maximum. Parameters that declare
+                                    their own steps, and switched, integer and enumerated ones, always move by one of their own steps.
+                                </Typography>
+                                <TextField size="small" type="number" label="Clicks per full range"
+                                    value={settings.encoderStepsPerRange}
+                                    inputProps={{ min: 4, max: 1000, step: 1 }}
+                                    onChange={event => {
+                                        const copy = settings.clone();
+                                        copy.encoderStepsPerRange = Number(event.target.value);
+                                        setSettings(copy);
+                                    }} />
+                            </CardContent>
+                        </Card>
+
+                        <Card variant="outlined">
+                            <CardContent>
                                 <Stack spacing={2}>
                                     <Box sx={{ display: "flex", alignItems: "center" }}>
                                         <Box sx={{ flex: 1 }}>
                                             <Typography variant="subtitle1">SSD1306 OLED display</Typography>
                                             <Typography variant="body2" color="text.secondary">
-                                                Starts on the two-knob effect view. Press Encoder 2 to cycle through controls, waveform, and the built-in strobe tuner.
+                                                Starts on the two shown parameters. Press the scroll encoder to cycle through parameters, waveform, and the built-in strobe tuner.
                                             </Typography>
                                         </Box>
                                         <Switch checked={settings.display.enabled} onChange={event => {
@@ -232,7 +250,7 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                                 onChange={event => { const copy = settings.clone(); copy.display.refreshIntervalMs = Number(event.target.value); setSettings(copy); }} />
                                         </Box>
                                         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
-                                            <FormControlLabel label="Include waveform view in Encoder 2 cycle" control={<Switch checked={settings.display.waveformEnabled}
+                                            <FormControlLabel label="Include waveform view in the OLED cycle" control={<Switch checked={settings.display.waveformEnabled}
                                                 onChange={event => { const copy = settings.clone(); copy.display.waveformEnabled = event.target.checked; setSettings(copy); }} />} />
                                             <FormControlLabel label="Use output waveform (off = input)" control={<Switch checked={settings.display.waveformOutput}
                                                 onChange={event => { const copy = settings.clone(); copy.display.waveformOutput = event.target.checked; setSettings(copy); }} />} />
@@ -313,7 +331,7 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                                             copy.encoderRolesConfigured = true;
                                                             setSettings(copy);
                                                         }}>
-                                                        {[GpioEncoderRole.None, GpioEncoderRole.PresetBrowser, GpioEncoderRole.EffectSelector,
+                                                        {[GpioEncoderRole.None, GpioEncoderRole.PresetBrowser, GpioEncoderRole.ParameterScroll,
                                                             GpioEncoderRole.Parameter1, GpioEncoderRole.Parameter2].map(role =>
                                                             <MenuItem key={role} value={role}>{encoderRoleName(role)}</MenuItem>)}
                                                     </TextField>

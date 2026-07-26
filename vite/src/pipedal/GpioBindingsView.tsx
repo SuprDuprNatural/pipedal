@@ -78,7 +78,6 @@ export default function GpioBindingsView() {
     const [pedalboard, setPedalboard] = useState<Pedalboard>(model.pedalboard.get());
     const [settings, setSettings] = useState<GpioSettings>(model.gpioSettings.get());
     const [statuses, setStatuses] = useState<GpioInputStatus[]>(model.gpioInputStatuses.get());
-    const [showAdvanced, setShowAdvanced] = useState(false);
 
     useEffect(() => {
         const pedalboardChanged = (value: Pedalboard) => setPedalboard(value);
@@ -98,10 +97,27 @@ export default function GpioBindingsView() {
         () => settings.inputs.filter(input => input.enabled),
         [settings]);
     const presetEncoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.PresetBrowser);
-    const effectEncoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.EffectSelector);
+    const scrollEncoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.ParameterScroll);
     const parameter1Encoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.Parameter1);
     const parameter2Encoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.Parameter2);
-    const hasStandardWorkflow = !!effectEncoder && (!!parameter1Encoder || !!parameter2Encoder);
+    const hasStandardWorkflow = !!scrollEncoder && (!!parameter1Encoder || !!parameter2Encoder);
+
+    // An encoder that holds a standard role turns its own way; only its push
+    // button is left for a mapping, and encoders 1 and 2 use even that.
+    const availableEvents = (input: GpioInputConfiguration | undefined): GpioBindingEventType[] => {
+        if (!input) return [];
+        if (input.inputType !== GpioInputType.Encoder) return [GpioBindingEventType.Value];
+        switch (input.encoderRole) {
+            case GpioEncoderRole.None:
+                return [GpioBindingEventType.EncoderTurn, GpioBindingEventType.EncoderButton];
+            case GpioEncoderRole.Parameter1:
+            case GpioEncoderRole.Parameter2:
+                return [GpioBindingEventType.EncoderButton];
+            default:
+                return [];
+        }
+    };
+    const mappableInputs = enabledInputs.filter(input => availableEvents(input).length !== 0);
 
     const targets = useMemo(() => {
         const result: TargetItem[] = [
@@ -122,11 +138,13 @@ export default function GpioBindingsView() {
 
     const effectTargets = targets.filter(target => target.item);
 
+    // The same rule the encoders use: only parameters the web interface itself
+    // would give the user a control for.
     const controlsFor = (instanceId: number): UiControl[] => {
         if (instanceId === Pedalboard.START_CONTROL_ID || instanceId === Pedalboard.END_CONTROL_ID) return [];
         const item = pedalboard.maybeGetItem(instanceId);
         const plugin = item ? model.getUiPlugin(item.uri) : null;
-        return plugin?.controls.filter(control => control.is_input && !control.is_bypass) ?? [];
+        return plugin?.controls.filter(control => control.is_input && !control.isHidden()) ?? [];
     };
 
     const applyControlDefaults = (binding: GpioBinding) => {
@@ -165,66 +183,27 @@ export default function GpioBindingsView() {
     };
 
     const addBinding = () => {
-        if (!enabledInputs.length) return;
+        if (!mappableInputs.length) return;
+        const input = mappableInputs[0];
         const binding = new GpioBinding();
-        binding.inputId = enabledInputs[0].id;
+        binding.inputId = input.id;
+        binding.eventType = availableEvents(input)[0];
         const firstEffect = effectTargets[0];
-        if (enabledInputs[0].inputType === GpioInputType.Encoder && firstEffect) {
+        if (binding.eventType === GpioBindingEventType.EncoderTurn && firstEffect) {
             binding.actionType = GpioActionType.Control;
             binding.instanceId = firstEffect.instanceId;
             binding.mode = GpioBindingMode.Relative;
-            binding.eventType = GpioBindingEventType.EncoderTurn;
             applyControlDefaults(binding);
         } else if (firstEffect) {
             binding.actionType = GpioActionType.Bypass;
             binding.instanceId = firstEffect.instanceId;
-            binding.mode = enabledInputs[0].inputType === GpioInputType.Momentary
-                ? GpioBindingMode.Toggle : GpioBindingMode.Direct;
+            binding.mode = input.inputType === GpioInputType.Latching
+                ? GpioBindingMode.Direct : GpioBindingMode.Toggle;
         } else {
             binding.actionType = GpioActionType.NextPreset;
             binding.mode = GpioBindingMode.Trigger;
         }
         saveBindings([...pedalboard.gpioBindings.map(value => value.clone()), binding]);
-    };
-
-    const standardBindingFor = (instanceId: number, slot: number): GpioBinding | undefined =>
-        pedalboard.gpioBindings.find(binding => binding.parameterSlot === slot && binding.instanceId === instanceId);
-
-    const setStandardParameter = (instanceId: number, slot: number, symbol: string) => {
-        const roleInput = slot === 1 ? parameter1Encoder : parameter2Encoder;
-        if (!roleInput) return;
-        const bindings = pedalboard.gpioBindings.map(value => value.clone());
-        let index = bindings.findIndex(binding => binding.parameterSlot === slot && binding.instanceId === instanceId);
-        if (!symbol) {
-            if (index !== -1) bindings.splice(index, 1);
-            saveBindings(bindings);
-            return;
-        }
-        if (index === -1) {
-            const binding = new GpioBinding();
-            binding.parameterSlot = slot;
-            binding.instanceId = instanceId;
-            bindings.push(binding);
-            index = bindings.length - 1;
-        }
-        const binding = bindings[index];
-        binding.enabled = true;
-        binding.inputId = roleInput.id;
-        binding.actionType = GpioActionType.Control;
-        binding.mode = GpioBindingMode.Relative;
-        binding.eventType = GpioBindingEventType.EncoderTurn;
-        binding.selectorInputId = effectEncoder?.id ?? "";
-        binding.symbol = symbol;
-        applyControlDefaults(binding);
-        saveBindings(bindings);
-    };
-
-    const setStandardStep = (instanceId: number, slot: number, stepValue: number) => {
-        const bindings = pedalboard.gpioBindings.map(value => value.clone());
-        const binding = bindings.find(value => value.parameterSlot === slot && value.instanceId === instanceId);
-        if (!binding || !Number.isFinite(stepValue) || stepValue <= 0) return;
-        binding.stepValue = stepValue;
-        saveBindings(bindings);
     };
 
     const inputFor = (id: string): GpioInputConfiguration | undefined => settings.inputs.find(input => input.id === id);
@@ -267,7 +246,7 @@ export default function GpioBindingsView() {
                 <Box>
                     <Typography variant="h6">Hardware controls for this preset</Typography>
                     <Typography variant="body2" color="text.secondary">
-                        Choose the two parameters you want available for each effect. These choices are saved with this preset.
+                        The parameter encoders reach every effect in this preset on their own. Mappings here are for footswitches, pedals, and encoder push buttons.
                     </Typography>
                 </Box>
 
@@ -278,69 +257,28 @@ export default function GpioBindingsView() {
                 {!enabledInputs.length && <Alert severity="warning">No hardware inputs are enabled in Settings.</Alert>}
 
                 {hasStandardWorkflow && (
-                    <>
-                        <Card variant="outlined">
-                            <CardContent>
-                                <Typography variant="subtitle1">Standard encoder workflow</Typography>
-                                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                                    The effect selector chooses which row is shown on the OLED. Its push button cycles controls, waveform, and tuner views. Each parameter encoder turn is one relative ±1 event.
-                                </Typography>
-                                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                                    {presetEncoder && <Chip label={`${presetEncoder.name}: presets`} />}
-                                    {effectEncoder && <Chip label={`${effectEncoder.name}: effects / OLED view`} />}
-                                    {parameter1Encoder && <Chip label={`${parameter1Encoder.name}: parameter 1`} />}
-                                    {parameter2Encoder && <Chip label={`${parameter2Encoder.name}: parameter 2`} />}
-                                </Box>
-                            </CardContent>
-                        </Card>
-
-                        {effectTargets.filter(target => controlsFor(target.instanceId).length !== 0).map(target => {
-                            const controls = controlsFor(target.instanceId);
-                            const slot1 = standardBindingFor(target.instanceId, 1);
-                            const slot2 = standardBindingFor(target.instanceId, 2);
-                            const renderSlot = (slot: number, encoder: GpioInputConfiguration | undefined, binding: GpioBinding | undefined) => {
-                                if (!encoder) return null;
-                                return (
-                                    <Box key={slot} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(220px, 1fr) 150px" }, gap: 1.5 }}>
-                                        <TextField select size="small" label={`${encoder.name} parameter`} value={binding?.symbol ?? ""}
-                                            onChange={event => setStandardParameter(target.instanceId, slot, event.target.value)}>
-                                            <MenuItem value="">Not assigned</MenuItem>
-                                            {controls.map(control => <MenuItem key={control.symbol} value={control.symbol}>{control.name}</MenuItem>)}
-                                        </TextField>
-                                        <TextField size="small" type="number" label="Parameter step / click"
-                                            disabled={!binding}
-                                            key={`${target.instanceId}-${slot}-${binding?.symbol ?? "none"}`}
-                                            defaultValue={binding?.stepValue ?? ""}
-                                            inputProps={{ min: 0.000001, max: 1000000, step: "any" }}
-                                            onBlur={event => setStandardStep(target.instanceId, slot, Number(event.target.value))} />
-                                    </Box>
-                                );
-                            };
-                            return (
-                                <Card variant="outlined" key={target.instanceId}>
-                                    <CardContent>
-                                        <Stack spacing={1.5}>
-                                            <Typography variant="subtitle1">{target.name}</Typography>
-                                            {renderSlot(1, parameter1Encoder, slot1)}
-                                            {renderSlot(2, parameter2Encoder, slot2)}
-                                        </Stack>
-                                    </CardContent>
-                                </Card>
-                            );
-                        })}
-                    </>
+                    <Card variant="outlined">
+                        <CardContent>
+                            <Typography variant="subtitle1">Standard encoder workflow</Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                                The scroll encoder moves through every parameter of every effect in the chain, two at a time, and the OLED
+                                shows those two. Nothing needs to be assigned here: where you are scrolled to is saved with the preset.
+                            </Typography>
+                            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                                {presetEncoder && <Chip label={`${presetEncoder.name}: presets`} />}
+                                {scrollEncoder && <Chip label={`${scrollEncoder.name}: scroll parameters / OLED view`} />}
+                                {parameter1Encoder && <Chip label={`${parameter1Encoder.name}: left parameter`} />}
+                                {parameter2Encoder && <Chip label={`${parameter2Encoder.name}: right parameter`} />}
+                            </Box>
+                        </CardContent>
+                    </Card>
                 )}
 
                 <Divider />
-                {hasStandardWorkflow && (
-                    <Button variant="text" onClick={() => setShowAdvanced(value => !value)}>
-                        {showAdvanced ? "Hide advanced mappings" : "Show advanced mappings"}
-                    </Button>
-                )}
 
-                {(showAdvanced || !hasStandardWorkflow) && pedalboard.gpioBindings.map((binding, index) => {
-                    if (binding.parameterSlot !== 0) return null;
+                {pedalboard.gpioBindings.map((binding, index) => {
                     const selectedInput = inputFor(binding.inputId);
+                    const inputEvents = availableEvents(selectedInput);
                     const isCommand = binding.actionType >= GpioActionType.LoadPreset;
                     const parameterControls = controlsFor(binding.instanceId);
                     return (
@@ -363,32 +301,34 @@ export default function GpioBindingsView() {
                                             onChange={event => updateBinding(index, value => {
                                                 value.inputId = event.target.value;
                                                 const input = inputFor(value.inputId);
+                                                value.eventType = availableEvents(input)[0] ?? GpioBindingEventType.Value;
                                                 if (input?.inputType === GpioInputType.Analog) {
                                                     value.mode = GpioBindingMode.Direct;
-                                                    value.eventType = GpioBindingEventType.Value;
-                                                } else if (input?.inputType === GpioInputType.Encoder) {
+                                                } else if (value.eventType === GpioBindingEventType.EncoderTurn) {
                                                     value.mode = GpioBindingMode.Relative;
-                                                    value.eventType = GpioBindingEventType.EncoderTurn;
-                                                } else {
-                                                    value.eventType = GpioBindingEventType.Value;
+                                                } else if (value.mode === GpioBindingMode.Relative) {
+                                                    value.mode = GpioBindingMode.Toggle;
                                                 }
-                                                value.selectorInputId = "";
                                             })}>
-                                            {settings.inputs.map(input => <MenuItem key={input.id} value={input.id} disabled={!input.enabled}>
-                                                {input.name || "Unnamed input"}{!input.enabled ? " (disabled)" : ""}
+                                            {mappableInputs.map(input => <MenuItem key={input.id} value={input.id}>
+                                                {input.name || "Unnamed input"}
                                             </MenuItem>)}
+                                            {selectedInput && !mappableInputs.some(input => input.id === selectedInput.id) &&
+                                                <MenuItem value={selectedInput.id}>{selectedInput.name || "Unnamed input"} (unavailable)</MenuItem>}
                                         </TextField>
                                         {selectedInput?.inputType === GpioInputType.Encoder && (
                                             <TextField select size="small" label="Encoder control" value={binding.eventType}
+                                                disabled={inputEvents.length < 2}
+                                                helperText={inputEvents.length < 2 ? "This encoder's turn drives the standard workflow." : undefined}
                                                 onChange={event => updateBinding(index, value => {
                                                     value.eventType = Number(event.target.value) as GpioBindingEventType;
-                                                    value.selectorInputId = "";
                                                     value.mode = value.eventType === GpioBindingEventType.EncoderTurn
                                                         ? GpioBindingMode.Relative
                                                         : value.actionType >= GpioActionType.LoadPreset ? GpioBindingMode.Trigger : GpioBindingMode.Toggle;
                                                 })}>
-                                                <MenuItem value={GpioBindingEventType.EncoderTurn}>Turn</MenuItem>
-                                                <MenuItem value={GpioBindingEventType.EncoderButton}>Push button</MenuItem>
+                                                {inputEvents.map(eventType => <MenuItem key={eventType} value={eventType}>
+                                                    {eventType === GpioBindingEventType.EncoderTurn ? "Turn" : "Push button"}
+                                                </MenuItem>)}
                                             </TextField>
                                         )}
                                         <TextField select size="small" label="Action" value={binding.actionType}
@@ -396,16 +336,13 @@ export default function GpioBindingsView() {
                                                 value.actionType = Number(event.target.value) as GpioActionType;
                                                 if (value.actionType >= GpioActionType.LoadPreset) {
                                                     value.mode = GpioBindingMode.Trigger;
-                                                    if (selectedInput?.inputType === GpioInputType.Encoder) {
-                                                        value.eventType = GpioBindingEventType.EncoderButton;
-                                                        value.selectorInputId = "";
-                                                    }
                                                     if (value.actionType === GpioActionType.LoadPreset) value.targetId = model.presets.get().selectedInstanceId;
                                                     if (value.actionType === GpioActionType.SelectSnapshot) value.targetId = 0;
                                                 } else if (value.actionType === GpioActionType.Bypass) {
                                                     value.instanceId = effectTargets[0]?.instanceId ?? -1;
                                                     value.minValue = 0;
                                                     value.maxValue = 1;
+                                                    if (value.mode === GpioBindingMode.Trigger) value.mode = GpioBindingMode.Toggle;
                                                 } else {
                                                     value.instanceId = targets[0]?.instanceId ?? -1;
                                                     applyControlDefaults(value);
@@ -470,18 +407,6 @@ export default function GpioBindingsView() {
                                         </TextField>
                                     )}
 
-                                    {selectedInput?.inputType === GpioInputType.Encoder &&
-                                        binding.eventType === GpioBindingEventType.EncoderTurn &&
-                                        binding.actionType === GpioActionType.Control && (
-                                        <TextField select size="small" label="Selected by" value={binding.selectorInputId}
-                                            helperText="Mappings with the same encoder and selector become a selectable list."
-                                            onChange={event => updateBinding(index, value => value.selectorInputId = event.target.value)}>
-                                            <MenuItem value="">Always active (move with other mappings)</MenuItem>
-                                            {enabledInputs.filter(input => input.inputType === GpioInputType.Encoder && input.id !== binding.inputId)
-                                                .map(input => <MenuItem key={input.id} value={input.id}>{input.name || "Unnamed encoder"}</MenuItem>)}
-                                        </TextField>
-                                    )}
-
                                     {binding.actionType === GpioActionType.Control && (
                                         <>
                                             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr 1fr" }, gap: 2 }}>
@@ -532,13 +457,13 @@ export default function GpioBindingsView() {
                     );
                 })}
 
-                {(showAdvanced || !hasStandardWorkflow) && (
-                    <>
-                        <Divider />
-                        <Button variant="outlined" startIcon={<AddIcon />} disabled={!enabledInputs.length} onClick={addBinding}>
-                            Add advanced mapping
-                        </Button>
-                    </>
+                <Button variant="outlined" startIcon={<AddIcon />} disabled={!mappableInputs.length} onClick={addBinding}>
+                    Add mapping
+                </Button>
+                {!mappableInputs.length && enabledInputs.length !== 0 && (
+                    <Alert severity="info">
+                        Every enabled input is taken by the standard encoder workflow. Add a footswitch or pedal, or free an encoder in Settings → Hardware.
+                    </Alert>
                 )}
                 <Box sx={{ height: 16 }} />
             </Stack>

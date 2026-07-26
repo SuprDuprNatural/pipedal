@@ -72,6 +72,7 @@ JSON_MAP_END()
 JSON_MAP_BEGIN(GpioSettings)
 JSON_MAP_REFERENCE(GpioSettings, enabled)
 JSON_MAP_REFERENCE(GpioSettings, encoderRolesConfigured)
+JSON_MAP_REFERENCE(GpioSettings, encoderStepsPerRange)
 JSON_MAP_REFERENCE(GpioSettings, inputs)
 JSON_MAP_REFERENCE(GpioSettings, display)
 JSON_MAP_END()
@@ -89,8 +90,6 @@ JSON_MAP_REFERENCE(GpioBinding, minValue)
 JSON_MAP_REFERENCE(GpioBinding, maxValue)
 JSON_MAP_REFERENCE(GpioBinding, curve)
 JSON_MAP_REFERENCE(GpioBinding, stepValue)
-JSON_MAP_REFERENCE(GpioBinding, selectorInputId)
-JSON_MAP_REFERENCE(GpioBinding, parameterSlot)
 JSON_MAP_END()
 
 JSON_MAP_BEGIN(GpioLineInfo)
@@ -497,13 +496,34 @@ namespace
         bool DrawDashboard(const GpioDisplayDashboard &dashboard, std::string *error)
         {
             Clear();
-            DrawTextCentered(64, 0,
-                             dashboard.effectName.empty() ? "NO CONTROL MAPPINGS"
-                                                          : dashboard.effectName,
-                             1, 21);
-            DrawHorizontal(0, 9, 128);
-            DrawKnob(32, 27, dashboard.controls[0], dashboard.activeSlot == 1);
-            DrawKnob(96, 27, dashboard.controls[1], dashboard.activeSlot == 2);
+            if (!dashboard.controls[0].assigned && !dashboard.controls[1].assigned)
+            {
+                DrawTextCentered(64, 20, "NO PARAMETERS", 1, 21);
+                DrawTextCentered(64, 34, "ADD AN EFFECT", 1, 21);
+                return Flush(error);
+            }
+
+            // The two shown parameters are adjacent in one list that spans the
+            // whole chain, so each column names its own effect. A single wide
+            // heading is clearer while both are in the same effect.
+            const auto &left = dashboard.controls[0];
+            const auto &right = dashboard.controls[1];
+            if (left.assigned && right.assigned && left.effectName == right.effectName)
+            {
+                DrawTextCentered(64, 0, left.effectName, 1, 21);
+            }
+            else
+            {
+                if (left.assigned) DrawTextCentered(32, 0, left.effectName, 1, 10);
+                if (right.assigned) DrawTextCentered(96, 0, right.effectName, 1, 10);
+            }
+            DrawHorizontal(0, 8, 128);
+            // Only across the knob band: a full-height rule crowds a
+            // ten-character parameter name.
+            for (int y = 12; y <= 36; ++y) Pixel(64, y);
+            DrawKnob(32, 25, left, dashboard.activeSlot == 1);
+            DrawKnob(96, 25, right, dashboard.activeSlot == 2);
+            DrawScrollBar(dashboard.scrollIndex, dashboard.scrollPositions);
             return Flush(error);
         }
 
@@ -655,7 +675,7 @@ namespace
             const GpioDisplayControl &control,
             bool active)
         {
-            constexpr int radius = 12;
+            constexpr int radius = 11;
             DrawCircle(centreX, centreY, radius);
             if (control.assigned)
             {
@@ -677,14 +697,28 @@ namespace
                 DrawHorizontal(centreX - 4, centreY, 9);
             }
 
-            DrawTextCentered(centreX, 43,
-                             control.assigned ? control.label : "UNASSIGNED",
+            DrawTextCentered(centreX, 40,
+                             control.assigned ? control.label : "NONE",
                              1, 10);
-            DrawTextCentered(centreX, 55,
+            DrawTextCentered(centreX, 50,
                              control.assigned ? control.value : "--",
                              1, 10);
             if (active)
-                DrawHorizontal(centreX - 28, 52, 56);
+                DrawHorizontal(centreX - 29, 58, 59);
+        }
+
+        // A whole-width bar along the bottom edge, showing how far through the
+        // chain's parameters the two shown knobs are.
+        void DrawScrollBar(int32_t index, int32_t positions)
+        {
+            if (positions <= 1)
+                return;
+            const int lastPosition = positions - 1;
+            const int clamped = std::clamp<int>(index, 0, lastPosition);
+            const int width = std::max(8, 128 / positions);
+            const int x = clamped * (128 - width) / lastPosition;
+            DrawHorizontal(0, 62, 128);
+            FillRect(x, 61, width, 3);
         }
         void FillRect(int x, int y, int width, int height)
         {
@@ -1460,7 +1494,7 @@ bool GpioSettings::EnsureStandardEncoderRoles()
             return left->i2cAddress_ < right->i2cAddress_;
         });
     encoders[0]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::PresetBrowser);
-    encoders[1]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::EffectSelector);
+    encoders[1]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::ParameterScroll);
     encoders[2]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter1);
     encoders[3]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter2);
     encoderRolesConfigured_ = true;
@@ -1473,6 +1507,10 @@ void GpioManager::Validate(const GpioSettings &settings)
     std::set<std::pair<std::string, int32_t>> digitalLines;
     std::set<std::pair<std::string, int32_t>> i2cAddresses;
     std::set<int32_t> encoderRoles;
+    if (settings.encoderStepsPerRange_ < 4 || settings.encoderStepsPerRange_ > 1000)
+    {
+        throw std::invalid_argument("Encoder clicks per parameter range must be between 4 and 1000.");
+    }
     for (const auto &input : settings.inputs_)
     {
         if (input.id_.empty() || input.id_.size() > 80)

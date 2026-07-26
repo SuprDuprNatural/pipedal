@@ -17,7 +17,7 @@ export enum GpioPull {
 export enum GpioEncoderRole {
     None = 0,
     PresetBrowser = 1,
-    EffectSelector = 2,
+    ParameterScroll = 2,
     Parameter1 = 3,
     Parameter2 = 4
 }
@@ -100,6 +100,7 @@ export class GpioSettings {
     deserialize(input: any): GpioSettings {
         this.enabled = input?.enabled ?? false;
         this.encoderRolesConfigured = input?.encoderRolesConfigured ?? false;
+        this.encoderStepsPerRange = input?.encoderStepsPerRange ?? 100;
         this.inputs = (input?.inputs ?? []).map((item: any) => new GpioInputConfiguration().deserialize(item));
         this.display = new GpioDisplaySettings().deserialize(input?.display);
         return this;
@@ -108,6 +109,7 @@ export class GpioSettings {
 
     enabled: boolean = false;
     encoderRolesConfigured: boolean = false;
+    encoderStepsPerRange: number = 100;
     inputs: GpioInputConfiguration[] = [];
     display: GpioDisplaySettings = new GpioDisplaySettings();
 }
@@ -152,8 +154,6 @@ export class GpioBinding {
         this.maxValue = input.maxValue ?? 1;
         this.curve = input.curve ?? 1;
         this.stepValue = input.stepValue ?? 0.01;
-        this.selectorInputId = input.selectorInputId ?? "";
-        this.parameterSlot = input.parameterSlot ?? 0;
         return this;
     }
     clone(): GpioBinding { return new GpioBinding().deserialize(this); }
@@ -173,8 +173,6 @@ export class GpioBinding {
     maxValue: number = 1;
     curve: number = 1;
     stepValue: number = 0.01;
-    selectorInputId: string = "";
-    parameterSlot: number = 0;
 }
 
 export class GpioLineInfo {

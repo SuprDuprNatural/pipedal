@@ -5,6 +5,7 @@
 #include "catch.hpp"
 #include "Gpio.hpp"
 #include "GpioTuner.hpp"
+#include "Pedalboard.hpp"
 
 #include <cmath>
 #include <sstream>
@@ -93,7 +94,7 @@ TEST_CASE("Standard encoder roles migrate once and remain unique", "[gpio]")
     REQUIRE(settings.EnsureStandardEncoderRoles());
     REQUIRE(settings.encoderRolesConfigured_);
     REQUIRE(settings.inputs_[3].encoderRole() == GpioEncoderRole::PresetBrowser);
-    REQUIRE(settings.inputs_[2].encoderRole() == GpioEncoderRole::EffectSelector);
+    REQUIRE(settings.inputs_[2].encoderRole() == GpioEncoderRole::ParameterScroll);
     REQUIRE(settings.inputs_[1].encoderRole() == GpioEncoderRole::Parameter1);
     REQUIRE(settings.inputs_[0].encoderRole() == GpioEncoderRole::Parameter2);
     REQUIRE_FALSE(settings.EnsureStandardEncoderRoles());
@@ -117,6 +118,7 @@ TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
     source.display_.enabled_ = true;
     source.display_.overlayTimeoutMs_ = 4250;
     source.encoderRolesConfigured_ = true;
+    source.encoderStepsPerRange_ = 64;
 
     std::stringstream json;
     json_writer writer(json, true);
@@ -128,6 +130,7 @@ TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
 
     REQUIRE(restored.enabled_);
     REQUIRE(restored.encoderRolesConfigured_);
+    REQUIRE(restored.encoderStepsPerRange_ == 64);
     REQUIRE(restored.inputs_.size() == 1);
     REQUIRE(restored.inputs_[0].id_ == "switch-a");
     REQUIRE(restored.inputs_[0].inputType() == GpioInputType::Latching);
@@ -147,8 +150,6 @@ TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
     binding.mode_ = static_cast<int32_t>(GpioBindingMode::Relative);
     binding.eventType_ = static_cast<int32_t>(GpioBindingEventType::EncoderTurn);
     binding.stepValue_ = 0.25f;
-    binding.selectorInputId_ = "selector";
-    binding.parameterSlot_ = 2;
 
     std::stringstream bindingJson;
     json_writer bindingWriter(bindingJson, true);
@@ -164,8 +165,49 @@ TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
     REQUIRE(restoredBinding.mode() == GpioBindingMode::Relative);
     REQUIRE(restoredBinding.eventType() == GpioBindingEventType::EncoderTurn);
     REQUIRE(restoredBinding.stepValue_ == 0.25f);
-    REQUIRE(restoredBinding.selectorInputId_ == "selector");
-    REQUIRE(restoredBinding.parameterSlot_ == 2);
+}
+
+TEST_CASE("A preset carries the parameter scroll position", "[gpio]")
+{
+    // The position is stored as the first shown parameter, not an index, so
+    // that it survives editing the effect chain. It is preset data: the same
+    // physical encoders land somewhere different in every rig.
+    Pedalboard source;
+    source.gpioScrollInstanceId(174);
+    source.gpioScrollSymbol("treble");
+
+    std::stringstream json;
+    json_writer writer(json, true);
+    writer.write(source);
+
+    Pedalboard restored;
+    json_reader reader(json);
+    reader.read(&restored);
+
+    REQUIRE(restored.gpioScrollInstanceId() == 174);
+    REQUIRE(restored.gpioScrollSymbol() == "treble");
+
+    // A preset written before this feature simply starts at the top.
+    Pedalboard legacy;
+    std::stringstream legacyJson{"{\"name\": \"Legacy\"}"};
+    json_reader legacyReader(legacyJson);
+    legacyReader.read(&legacy);
+    REQUIRE(legacy.gpioScrollInstanceId() == -1);
+    REQUIRE(legacy.gpioScrollSymbol().empty());
+}
+
+TEST_CASE("Encoder resolution is validated", "[gpio]")
+{
+    GpioSettings settings;
+    settings.enabled_ = true;
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+
+    settings.encoderStepsPerRange_ = 3;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+    settings.encoderStepsPerRange_ = 1001;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+    settings.encoderStepsPerRange_ = 250;
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
 }
 
 TEST_CASE("Built-in GPIO tuner locks accurately on bass notes", "[gpio]")
@@ -262,11 +304,12 @@ TEST_CASE("A persistent dashboard does not restart the overlay timeout", "[gpio]
     REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Waveform);
 
     GpioDisplayDashboard dashboard;
-    dashboard.effectName = "TEST EFFECT";
+    dashboard.controls[0].assigned = true;
+    dashboard.controls[0].effectName = "TEST EFFECT";
     manager->ShowTemporaryControlDashboard(dashboard);
     REQUIRE(manager->GetDisplayMode() == GpioDisplayMode::Waveform);
 
-    dashboard.effectName = "UPDATED";
+    dashboard.controls[0].effectName = "UPDATED";
     manager->ShowControlDashboard(dashboard);
     REQUIRE(manager->GetDisplayMode() == GpioDisplayMode::Waveform);
 
@@ -280,8 +323,8 @@ TEST_CASE("OLED mode button cycles controls waveform and tuner", "[gpio]")
     REQUIRE(manager->GetDisplayMode() == GpioDisplayMode::Controls);
     REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Waveform);
     GpioDisplayDashboard dashboard;
-    dashboard.effectName = "TEST EFFECT";
     dashboard.controls[0].assigned = true;
+    dashboard.controls[0].effectName = "TEST EFFECT";
     dashboard.controls[0].label = "GAIN";
     dashboard.controls[0].value = "0.5";
     dashboard.controls[0].normalizedValue = 0.5f;
