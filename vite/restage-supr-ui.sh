@@ -13,7 +13,16 @@
 cd "$(dirname "$0")"
 
 echo "== building =="
+# Clear dist first. Without this a failed build leaves the previous bundle in
+# place, and the staging below happily ships it — which looks exactly like a
+# successful deploy while changing nothing on the Pi. With dist gone, a broken
+# build has nothing to stage and the script stops.
+rm -rf dist
 npm run build
+if ! ls dist/assets/main-*.js >/dev/null 2>&1; then
+    echo "build produced no bundle - aborting" >&2
+    exit 1
+fi
 rm -f dist/assets/*.js.gz
 for f in dist/assets/*.js; do gzip -c "$f" > "$f.gz"; done
 

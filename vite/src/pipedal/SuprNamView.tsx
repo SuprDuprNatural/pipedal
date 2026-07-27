@@ -90,19 +90,10 @@ function decodeModelInfo(values: number[]): SlotInfo[] {
     return slots;
 }
 
-// Must match enum class Routing in SuprPedals/src/NamDsp.h.
-enum Routing {
-    Single = 0,
-    Parallel2 = 1,
-    Series2 = 2,
-    Parallel3 = 3,
-    SeriesParallel = 4,
-    ParallelSeries = 5,
-    Series3 = 6,
-}
-
-// Stages, matching planFor() in NamDsp.h. Each entry is a list of stages, and
-// each stage is the slots that run in parallel within it.
+// Stages, matching planFor() and enum class Routing in
+// SuprPedals/src/NamDsp.h. The index is the Routing port's value; each entry
+// is that routing's list of stages, and each stage is the slots that run in
+// parallel within it.
 const ROUTING_PLANS: number[][][] = [
     [[0]],              // A
     [[0, 1]],           // A ∥ B
