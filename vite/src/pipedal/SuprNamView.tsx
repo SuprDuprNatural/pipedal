@@ -470,13 +470,14 @@ const SuprNamView =
                     columns.push(this.slotColumn(slot, modelNodes[slot], used[slot]));
                 }
 
+                // No calibration section: SuprNAM normalises every model to
+                // -18 LUFS internally and offers no input calibration, because
+                // that only ever did anything for models that recorded their
+                // training level and almost none do. Drive, per slot, is the
+                // control that replaced it.
                 columns.push({
                     sections: [
                         { label: "Amp", rows: [["inputGain", "outputGain"], ["gate", "threaded"]] },
-                        {
-                            label: "Calibration",
-                            rows: [["inputCalibrationMode", "outputCalibration"], ["calibration"]]
-                        },
                     ]
                 });
 
