@@ -37,9 +37,11 @@ import ToobNamViewFactory from './ToobNamView';
 import ToobParametericEqViewFactory from './ToobParametricEqView';
 import {ToobParametricEqViewFactoryStereo} from './ToobParametricEqView';
 import { SuprCompressorViewFactory, SuprVuViewFactory, SuprSpectrumViewFactory, SuprOctaveViewFactory, SuprOctavePlusViewFactory, SuprEnvFilterViewFactory, SuprTunerViewFactory } from './SuprPedalViews';
+import { SuprNamViewFactory } from './SuprNamView';
 
 
 let pluginFactories: IControlViewFactory[] = [
+    new SuprNamViewFactory(),
     new SuprCompressorViewFactory(),
     new SuprVuViewFactory(),
     new SuprOctaveViewFactory(),

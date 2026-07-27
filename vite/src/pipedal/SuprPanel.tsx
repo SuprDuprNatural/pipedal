@@ -80,6 +80,43 @@ export function mapControlNodes(
     return result;
 }
 
+// The nodes in a ControlGroup that are not ports — file browsers and
+// frequency plots, which PluginControlView splices into the group alongside
+// the real controls. mapControlNodes drops them, because they have no port
+// symbol to key on; this returns them in declaration order instead.
+//
+// It works by index: a file property's lv2:index is only used for ordering
+// within its group, so declaring them above the port range (SuprNAM uses 100
+// upwards) guarantees they never collide with a real port index. Without that
+// a file property at index 0 would be mistaken for whichever port is at 0 and
+// would quietly replace it.
+export function mapExtraNodes(
+    model: PiPedalModel,
+    uri: string,
+    controls: (ReactNode | ControlGroup)[]
+): ReactNode[] {
+    const plugin = model.getUiPlugin(uri);
+    if (!plugin)
+        return [];
+
+    let portIndexes = new Set<number>();
+    for (let control of plugin.controls) {
+        portIndexes.add(control.index);
+    }
+
+    let extras: ReactNode[] = [];
+    for (let item of controls) {
+        if (item instanceof ControlGroup) {
+            for (let i = 0; i < item.controls.length; ++i) {
+                if (!portIndexes.has(item.indexes[i])) {
+                    extras.push(item.controls[i]);
+                }
+            }
+        }
+    }
+    return extras;
+}
+
 function sectionLabel(section: PanelSection): ReactNode {
     // A fixed-height slot whether or not there's text, so knob rows align
     // across neighbouring sections.

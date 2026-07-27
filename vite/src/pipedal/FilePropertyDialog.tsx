@@ -71,7 +71,21 @@ import Tone3000DownloadType from './Tone3000DownloadType';
 import { ModelSelectionDialog, ModelSelectionDialogParams } from './ModelSelectionDialog';
 
 
-const ToobNamModelFileUrl = "http://two-play.com/plugins/toob-nam#modelFile";
+// Patch properties that hold a Neural Amp Modeler model file. The TONE3000
+// download button and its help dialog are offered for any of them.
+//
+// This is a list rather than a single URI because SuprNAM has three model
+// slots, one patch property each. All of them declare the same
+// pipedal_ui:directory ("NeuralAmpModels"), and the server resolves that to
+// uploads/<directory> without reference to the plugin, so every NAM plugin
+// browses one shared model folder and a model downloaded from any of them is
+// immediately visible to the rest.
+const NamModelFileUrls = [
+    "http://two-play.com/plugins/toob-nam#modelFile",
+    "https://suprduprnatural.github.io/supr-pedals/nam#modelA",
+    "https://suprduprnatural.github.io/supr-pedals/nam#modelB",
+    "https://suprduprnatural.github.io/supr-pedals/nam#modelC",
+];
 const ToobMlModelFileUrl = "http://two-play.com/plugins/toob-ml#modelFile";
 const ToobCabIrFileUrls = [
     "http://two-play.com/plugins/toob-cab-ir#impulseFile",
@@ -1113,7 +1127,7 @@ export default withStyles(
             // The dialog just provides a blocker dialog to cancel the popup if the TONE3000 Select APIs escape.
 
             let downloadType: Tone3000DownloadType = Tone3000DownloadType.Nam;
-            if (this.props.fileProperty.patchProperty === ToobNamModelFileUrl) {
+            if (NamModelFileUrls.includes(this.props.fileProperty.patchProperty)) {
                 downloadType = Tone3000DownloadType.Nam;
             } else if (ToobCabIrFileUrls.includes(this.props.fileProperty.patchProperty)) {
                 downloadType = Tone3000DownloadType.CabIr;
@@ -1167,7 +1181,7 @@ export default withStyles(
 
         render() {
             const isTracksDirectory = this.isTracksDirectory();
-            const isToobNamModelFile = this.props.fileProperty.patchProperty === ToobNamModelFileUrl;
+            const isNamModelFile = NamModelFileUrls.includes(this.props.fileProperty.patchProperty);
             const isToobCabIrFile = ToobCabIrFileUrls.includes(this.props.fileProperty.patchProperty);
             const isToobMLModelFile = this.props.fileProperty.patchProperty === ToobMlModelFileUrl;
 
@@ -1591,7 +1605,7 @@ export default withStyles(
                             <>
                                 <DialogActions style={{ justifyContent: "stretch", width: "100%" }}>
                                     <div style={{ display: "flex", flexFlow: "column nowrap", width: "100%", alignItems: "stretch", }}>
-                                        {(isToobNamModelFile || isToobCabIrFile) && (
+                                        {(isNamModelFile || isToobCabIrFile) && (
                                             <div style={{
                                                 display: "flex", flexFlow: "row nowrap", justifyContent: "center",
                                                 alignItems: "center", width: "100%"
@@ -1600,7 +1614,7 @@ export default withStyles(
                                                     onClick={(e) => { this.handleTone3000Dialog(e); }}
                                                 >
                                                     {
-                                                        isToobNamModelFile
+                                                        isNamModelFile
                                                             ? "Download model files from TONE3000"
                                                             : "Download I/R files from TONE3000"
                                                     }
@@ -1836,7 +1850,7 @@ export default withStyles(
                             <Tone3000HelpDialog
                                 open={this.state.openTone3000Help}
                                 onClose={() => this.setState({ openTone3000Help: false })}
-                                downloadType={isToobNamModelFile ? Tone3000DownloadType.Nam : Tone3000DownloadType.CabIr}
+                                downloadType={isNamModelFile ? Tone3000DownloadType.Nam : Tone3000DownloadType.CabIr}
                             />
                         )}
                         {this.state.openGuitarMlHelp && (
