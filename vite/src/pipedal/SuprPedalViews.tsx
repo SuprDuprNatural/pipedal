@@ -1,6 +1,6 @@
 // Custom control views for Supr pedals: a big gain-reduction meter for
 // SuprCompressor, a stereo needle VU for SuprVU, and live filter-response
-// plots for SuprOctavePlus and SuprEnvelopeFilter.
+// plots for SuprOctavePlus and SuprEnvelope.
 //
 // MIT license, (c) 2026 SuprDuprNatural.
 
@@ -17,7 +17,6 @@ import SuprMeterControl, { MeterTick } from './SuprMeterControl';
 import SuprResponsePlot from './SuprResponsePlot';
 import SuprTunerDisplay from './SuprTunerDisplay';
 import SuprTransientDisplay from './SuprTransientDisplay';
-import SuprStepKnob from './SuprStepKnob';
 import SuprChorusDisplay from './SuprChorusDisplay';
 import { PanelColumn, SuprPanelUnit, mapControlNodes } from './SuprPanel';
 import ToobSpectrumResponseView from './ToobSpectrumResponseView';
@@ -232,29 +231,46 @@ const SuprSpectrumView =
         styles
     );
 
-// The compressor face: big GR meter on the left, the Compression section on
-// the right with the Output section nestled directly beneath it — like the
-// front panel of a real studio compressor. (The gr port is pprops:notOnGUI;
-// the meter displays it instead.)
+// The compressor face is one uninterrupted console section: the four timing
+// controls sit directly under the GR meter, while the three setup/output
+// controls form a balanced stack at its right.
 const SuprCompressorView = makePanelView((ctx) => [
     {
-        grow: 0, sections: [{
-            rows: [[(
-                <SuprMeterControl key="supr_gr_meter"
-                    instanceId={ctx.instanceId}
-                    needles={[{ port: "gr", color: "#b03030" }]}
-                    ticks={GR_TICKS}
-                    minDb={-30} maxDb={0} gamma={2.4}
-                    label="GAIN REDUCTION"
-                    width={360} height={160} />
-            )]]
+        sections: [{
+            noLabelSlot: true,
+            rowAlign: "stretch",
+            rowGap: 8,
+            rows: [[
+                {
+                    panelGroup: "column",
+                    items: [
+                        (
+                            <SuprMeterControl key="supr_gr_meter"
+                                instanceId={ctx.instanceId}
+                                needles={[{ port: "gr", color: "#b03030" }]}
+                                ticks={GR_TICKS}
+                                minDb={-30} maxDb={0} gamma={2.4}
+                                label="GAIN REDUCTION"
+                                width={360} height={160} />
+                        ),
+                        {
+                            panelGroup: "row",
+                            items: ["threshold", "ratio", "attack", "release"]
+                        }
+                    ]
+                },
+                {
+                    panelGroup: "column",
+                    items: [
+                        { supr: "makeup", step: 3, showReadout: true, showPointer: true },
+                        { supr: "blend", marks: "home" },
+                        { supr: "schpf", marks: "home" }
+                    ],
+                    justify: "space-evenly",
+                    stretch: true
+                }
+            ]]
         }]
-    },
-    {
-        sections: [
-            { label: "Compression", rows: [["threshold", "ratio", "attack", "release", "schpf"]] },
-            { label: "Output", rows: [["makeup", "blend"]] },
-        ]
     },
 ]);
 
@@ -289,7 +305,7 @@ const SuprVuView = makePanelView((ctx) => [
             )]]
         }]
     },
-    { sections: [{ rows: [["calibration"]] }] },
+    { sections: [{ rows: [[{ supr: "calibration", marks: "home" }]] }] },
 ]);
 
 // ---------------------------------------------------------------------------
@@ -344,15 +360,19 @@ function makePanelView(builder: PanelBuilder) {
             modifyControls(host: ICustomizationHost,
                 controls: (React.ReactNode | ControlGroup)[]): (React.ReactNode | ControlGroup)[] {
                 const nodes = mapControlNodes(this.model, this.props.item.uri, controls);
+                const controlValues = this.currentControlValues();
                 const built = builder({
                     instanceId: this.props.instanceId,
-                    controlValues: this.currentControlValues()
+                    controlValues: controlValues
                 });
                 const spec: PanelSpec =
                     Array.isArray(built) ? { columns: built } : built;
                 return [(
                     <SuprPanelUnit key="supr_panel" columns={spec.columns}
                         header={spec.header} nodes={nodes}
+                        instanceId={this.props.instanceId}
+                        uri={this.props.item.uri}
+                        controlValues={controlValues}
                         tallControl={true} />
                 )];
             }
@@ -378,8 +398,15 @@ function makePanelView(builder: PanelBuilder) {
 // is roughly as tall as it is wide. Pure one-per-row columns were tried and
 // are worse — anything with more than four controls turns into a ladder.
 const SuprOctaveView = makePanelView(() => [
-    { sections: [{ label: "Mix", rows: [["direct", "oct1"], ["oct2"]] }] },
-    { sections: [{ label: "Sub", rows: [["tone"], ["gate"]] }] },
+    {
+        sections: [{
+            noLabelSlot: true,
+            rows: [
+                [{ supr: "direct", marks: "home" }, { supr: "oct1", marks: "home" }],
+                [{ supr: "tone", marks: "home" }, { supr: "gate", marks: "home" }]
+            ]
+        }]
+    }
 ]);
 
 // This one is not a pedal and should not look like one. Twenty-one controls
@@ -398,7 +425,13 @@ const SuprOctavePlusView = makePanelView((ctx) => [
                         variant="octaveplus" controls={ctx.controlValues} frameless />
                 )]]
             },
-            { label: "Mixer", roomy: true, rows: [["direct", "gate"], ["oct1", "tone"]] },
+            {
+                label: "Mixer", roomy: true,
+                rows: [
+                    [{ supr: "direct", marks: "home" }, { supr: "gate", marks: "home" }],
+                    [{ supr: "oct1", marks: "home" }, { supr: "tone", marks: "home" }]
+                ]
+            },
         ]
     },
     {
@@ -408,12 +441,31 @@ const SuprOctavePlusView = makePanelView((ctx) => [
         // captions: the knob to their left already names the oscillator.
         sections: [{
             label: "Synth", roomy: true,
-            rows: [["osc1level", "osc1oct", { compactSelect: "osc1wave" }],
-            ["osc2level", "osc2oct", { compactSelect: "osc2wave" }],
-            ["detune", "glide"]]
+            rows: [
+                [
+                    { supr: "osc1level", marks: "home" },
+                    { supr: "osc1oct", step: 1, showReadout: true },
+                    { supr: "osc1wave", compact: true }
+                ],
+                [
+                    { supr: "osc2level", marks: "home" },
+                    { supr: "osc2oct", step: 1, showReadout: true },
+                    { supr: "osc2wave", compact: true }
+                ],
+                [{ supr: "detune", marks: "home" }, "glide"]
+            ]
         }]
     },
-    { sections: [{ label: "Filter", roomy: true, rows: [["cutoff", "res"], ["envmod", "keytrack"], ["fattack", "fdecay"]] }] },
+    {
+        sections: [{
+            label: "Filter", roomy: true,
+            rows: [
+                [{ supr: "cutoff", marks: "home" }, "res"],
+                [{ supr: "envmod", marks: "home" }, { supr: "keytrack", marks: "home" }],
+                ["fattack", "fdecay"]
+            ]
+        }]
+    },
 ]);
 
 // Drive and the tone stack down the left, the two voicing switches and the
@@ -422,21 +474,46 @@ const SuprOctavePlusView = makePanelView((ctx) => [
 const SuprSansView = makePanelView(() => [
     {
         sections: [
-            { label: "Drive", rows: [["drive", "blend"]] },
-            { label: "Tone", rows: [["bass", "mid"], ["midfreq", "treble"]] },
+            {
+                noLabelSlot: true,
+                rows: [["drive", { supr: "blend", marks: "home" }]]
+            },
+            {
+                noLabelSlot: true,
+                rows: [
+                    [{ supr: "bass", marks: "home" }, { supr: "mid", marks: "home" }],
+                    [{ supr: "midfreq", marks: "home" }, { supr: "treble", marks: "home" }]
+                ]
+            },
         ]
     },
     {
-        sections: [
-            { label: "Filters", rows: [["air"], ["rumble"]] },
-            { label: "Output", rows: [["level"]] },
-        ]
+        sections: [{
+            noLabelSlot: true,
+            spreadRows: true,
+            rows: [
+                [{ supr: "air", hideLabel: true, buttonText: "AIR\nLIFT" }],
+                [{ supr: "rumble", hideLabel: true, buttonText: "RUMBLE\nCUT" }],
+                [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+            ]
+        }]
     },
 ]);
 
 const SuprFuzzView = makePanelView(() => [
-    { sections: [{ label: "Fuzz", rows: [["sustain", "tone"], ["octave"]] }] },
-    { sections: [{ label: "Output", rows: [["gate", "blend"], ["level"]] }] },
+    {
+        sections: [{
+            noLabelSlot: true,
+            rows: [
+                [
+                    { supr: "sustain", marks: "fill", markCount: 11 },
+                    { supr: "tone", marks: "endpoints" }
+                ],
+                [{ supr: "gate" }, { supr: "blend", marks: "endpoints" }],
+                [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+            ]
+        }]
+    }
 ]);
 
 // Three identical band strips side by side, each read top to bottom, so the
@@ -446,11 +523,53 @@ const SuprFuzzView = makePanelView(() => [
 // wider. Signal order across: the splits that make the bands, the bands, and
 // the blend and level that end them.
 const SuprBandView = makePanelView(() => [
-    { sections: [{ label: "Crossover", rows: [["split1"], ["split2"]] }] },
-    { sections: [{ label: "Low", rows: [["lowComp"], ["lowDrive"], ["lowLevel"]] }] },
-    { sections: [{ label: "Mid", rows: [["midComp"], ["midDrive"], ["midLevel"]] }] },
-    { sections: [{ label: "High", rows: [["highComp"], ["highDrive"], ["highLevel"]] }] },
-    { sections: [{ label: "Output", rows: [["blend"], ["level"]] }] },
+    {
+        sections: [{
+            noLabelSlot: true,
+            centerRows: true,
+            rows: [[{ supr: "split1", marks: "home" }], [{ supr: "split2", marks: "home" }]]
+        }]
+    },
+    {
+        sections: [{
+            label: "Low",
+            rows: [
+                [{ supr: "lowComp", marks: "home" }],
+                [{ supr: "lowDrive", marks: "home" }],
+                [{ supr: "lowLevel", step: 3, showReadout: true, showPointer: true }]
+            ]
+        }]
+    },
+    {
+        sections: [{
+            label: "Mid",
+            rows: [
+                [{ supr: "midComp", marks: "home" }],
+                [{ supr: "midDrive", marks: "home" }],
+                [{ supr: "midLevel", step: 3, showReadout: true, showPointer: true }]
+            ]
+        }]
+    },
+    {
+        sections: [{
+            label: "High",
+            rows: [
+                [{ supr: "highComp", marks: "home" }],
+                [{ supr: "highDrive", marks: "home" }],
+                [{ supr: "highLevel", step: 3, showReadout: true, showPointer: true }]
+            ]
+        }]
+    },
+    {
+        sections: [{
+            noLabelSlot: true,
+            centerRows: true,
+            rows: [
+                [{ supr: "blend", marks: "home" }],
+                [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+            ]
+        }]
+    },
 ]);
 
 const SuprEnvFilterView = makePanelView((ctx) => [
@@ -465,23 +584,37 @@ const SuprEnvFilterView = makePanelView((ctx) => [
             ]
         }]
     },
-    { sections: [{ label: "Envelope", rows: [["sens"], ["attack", "release"]] }] },
-    { sections: [{ label: "Filter", rows: [["cutoff", "range"], ["res"]] }] },
-    { sections: [{ label: "Output", rows: [["blend"], ["level"]] }] },
+    {
+        sections: [{
+            label: "Envelope",
+            rows: [[{ supr: "sens", marks: "home" }], ["attack", "release"]]
+        }]
+    },
+    {
+        sections: [{
+            label: "Filter",
+            rows: [[{ supr: "cutoff", marks: "home" }, "range"], ["res"]]
+        }]
+    },
+    {
+        sections: [{
+            label: "Output",
+            rows: [[{ supr: "blend", marks: "home" }], [{ supr: "level", marks: "home" }]]
+        }]
+    },
 ]);
 
 const SuprTunerView = makePanelView((ctx) => [
     {
         grow: 0, sections: [{
-            rows: [[(
-                <SuprTunerDisplay key="supr_tuner_display"
-                    instanceId={ctx.instanceId} />
-            )]]
-        }]
-    },
-    {
-        sections: [{
-            rows: [["mute"]]
+            noLabelSlot: true,
+            rows: [
+                [(
+                    <SuprTunerDisplay key="supr_tuner_display"
+                        instanceId={ctx.instanceId} />
+                )],
+                [{ supr: "mute", hideLabel: true }]
+            ]
         }]
     },
 ]);
@@ -505,32 +638,73 @@ const SuprTransientView = makePanelView((ctx) => ({
         {
             sections: [{
                 noLabelSlot: true,
-                rows: [["attack"], ["sustain"], [(
-                    <SuprStepKnob key="supr_transient_hr"
-                        instanceId={ctx.instanceId} symbol="hr"
-                        value={ctx.controlValues["hr"] ?? 0}
-                        label="HR" step={3} min={-12} max={12} />
-                )]]
+                rows: [
+                    [{ supr: "attack", marks: "home" }],
+                    [{ supr: "sustain", marks: "home" }],
+                    [{ supr: "hr", step: 3 }]
+                ]
             }]
         },
-        { sections: [{ noLabelSlot: true, rows: [["schpf"], ["focus"], ["level"]] }] },
+        {
+            sections: [{
+                noLabelSlot: true,
+                rows: [
+                    [{ supr: "schpf", marks: "home" }],
+                    [{ supr: "focus", marks: "home" }],
+                    [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+                ]
+            }]
+        },
     ]
 }));
 
-// The display carries the whole state of the pedal, so the knobs sit under it
-// as one unlabelled 3x2 block. Modulation on the top row, band on the bottom.
+// The display and controls are one section. Turning the display onto its side
+// gives it the same stature as the three two-knob rows beside it.
 const SuprChorusView = makePanelView((ctx) => [
     {
-        grow: 0, sections: [{
-            rows: [[(
-                <SuprChorusDisplay key="supr_chorus_display"
-                    instanceId={ctx.instanceId} controls={ctx.controlValues} />
-            )]]
-        }]
-    },
-    {
         sections: [{
-            rows: [["rate", "depth", "voices"], ["low", "tone", "mix"]]
+            noLabelSlot: true,
+            rowAlign: "center",
+            rowGap: 8,
+            rows: [[
+                (
+                    <div key="supr_chorus_display_rotated" style={{
+                        position: "relative", width: 116, height: 248
+                    }}>
+                        <div style={{
+                            position: "absolute", left: "50%", top: "50%",
+                            transform: "translate(-50%, -50%) rotate(-90deg)"
+                        }}>
+                            <SuprChorusDisplay
+                                instanceId={ctx.instanceId}
+                                controls={ctx.controlValues} />
+                        </div>
+                    </div>
+                ),
+                {
+                    panelGroup: "column",
+                    items: [
+                        {
+                            panelGroup: "row",
+                            items: ["rate", { supr: "depth", marks: "home" }]
+                        },
+                        {
+                            panelGroup: "row",
+                            items: [
+                                { supr: "low", marks: "home" },
+                                { supr: "tone", marks: "home" }
+                            ]
+                        },
+                        {
+                            panelGroup: "row",
+                            items: [
+                                { supr: "voices", step: 1, showReadout: true },
+                                { supr: "mix", marks: "home" }
+                            ]
+                        }
+                    ]
+                }
+            ]]
         }]
     },
 ]);

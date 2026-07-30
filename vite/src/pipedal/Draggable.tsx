@@ -58,6 +58,7 @@ export interface DraggableProps extends WithStyles<typeof styles> {
 
     children?: ReactNode | ReactNode[];
     draggable?: boolean;
+    moveElement?: boolean;
     style?: React.CSSProperties;
 
 
@@ -169,7 +170,7 @@ const Draggable =
                     if (navigator.vibrate) {
                         navigator.vibrate([10]);
                     }
-                    if (!this.dragStarted) {
+                    if (!this.dragStarted && this.props.moveElement !== false) {
                         this.dragTarget!.style.transform = "scale(" + SELECT_SCALE + ")";
                         this.dragTarget!.style.zIndex = "3";
                     }
@@ -199,7 +200,9 @@ const Draggable =
                 }
                 this.dragStarted = false;
                 if (this.captureElement) {
-                    this.clearDragTransform(this.captureElement);
+                    if (this.props.moveElement !== false) {
+                        this.clearDragTransform(this.captureElement);
+                    }
                     this.captureElement = undefined;
                 }
                 this.mouseDown = false;
@@ -247,8 +250,10 @@ const Draggable =
                     this.pointerType = e.pointerType;
                     this.savedIndex = e.currentTarget.style.zIndex;
                     this.savedOpacity = e.currentTarget.style.opacity;
-                    e.currentTarget.style.opacity = "0.9";
-                    if (this.pointerType !== "touch") {
+                    if (this.props.moveElement !== false) {
+                        e.currentTarget.style.opacity = "0.9";
+                    }
+                    if (this.pointerType !== "touch" && this.props.moveElement !== false) {
                         this.dragTarget.style.transform = "scale(" + SELECT_SCALE + ")";
                         this.dragTarget.style.zIndex = "3";
                         this.dragTarget.style.position = "absolute";
@@ -393,7 +398,13 @@ const Draggable =
                     if (this.dragStarted) {
                         this.lastX = e.clientX;
                         this.lastY = e.clientY;
-                        e.currentTarget.style.transform = this.makeTransform(e.currentTarget, e.clientX, e.clientY);
+                        if (this.props.moveElement !== false) {
+                            e.currentTarget.style.transform = this.makeTransform(
+                                e.currentTarget,
+                                e.clientX,
+                                e.clientY
+                            );
+                        }
                         e.stopPropagation();
                         e.preventDefault();
 
@@ -417,7 +428,9 @@ const Draggable =
                     this.startX -= (scrollContainer.scrollLeft - tx);
                     this.startY -= (scrollContainer.scrollTop - ty);
 
-                    currentTarget.style.transform = this.makeTransform(currentTarget, this.lastX, this.lastY);
+                    if (this.props.moveElement !== false) {
+                        currentTarget.style.transform = this.makeTransform(currentTarget, this.lastX, this.lastY);
+                    }
 
                     this.checkForAutoScroll(currentTarget);
                 }
@@ -455,15 +468,21 @@ const Draggable =
                     }
                 } else if (this.lastX >= scrollContainerRect.right - AUTOSCROLL_THRESHOLD) {
                     dx = AUTOSCROLL_SCROLL_RATE;
-                    let maxScroll = Math.max(scrollContainer.scrollWidth - scrollContainer.clientWidth, 0);
+                    let maxScroll = Math.max(
+                        scrollContainer.scrollWidth - scrollContainer.clientWidth - scrollContainer.scrollLeft,
+                        0
+                    );
                     if (dx > maxScroll) dx = maxScroll;
                 }
-                if (this.lastY < scrollContainerRect.top) {
+                if (this.lastY < scrollContainerRect.top + AUTOSCROLL_THRESHOLD) {
                     dy = -AUTOSCROLL_SCROLL_RATE;
                     if (dy < -scrollContainer.scrollTop) dy = -scrollContainer.scrollTop;
-                } else if (this.lastY >= scrollContainerRect.top - AUTOSCROLL_THRESHOLD) {
+                } else if (this.lastY >= scrollContainerRect.bottom - AUTOSCROLL_THRESHOLD) {
                     dy = AUTOSCROLL_SCROLL_RATE;
-                    let maxScroll = Math.max(scrollContainer.scrollHeight - scrollContainer.clientHeight);
+                    let maxScroll = Math.max(
+                        scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop,
+                        0
+                    );
                     if (dy > maxScroll) dy = maxScroll;
                 }
 

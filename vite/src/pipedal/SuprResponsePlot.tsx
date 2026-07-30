@@ -209,7 +209,7 @@ const SuprResponsePlot =
 
             envFilterRestingFc(): number {
                 const cutoff = this.value("cutoff", 120);
-                const range = this.value("range", 3);
+                const range = this.value("range", 3) * 1.6;
                 const dir = Math.round(this.value("dir", 0));
                 // Up rests at the base cutoff; Down rests at the top of the sweep
                 const fc = dir === 1 ? cutoff * Math.pow(2, range) : cutoff;
@@ -219,7 +219,7 @@ const SuprResponsePlot =
             renderEnvFilter(elements: React.ReactNode[], key: number,
                 accent: string, faint: string): number {
                 const cutoff = this.value("cutoff", 120);
-                const range = this.value("range", 3);
+                const range = this.value("range", 3) * 1.6;
                 const liveFcRaw = this.state.live["fc"];
                 const fcLive = (liveFcRaw !== undefined && liveFcRaw > 0)
                     ? liveFcRaw : this.envFilterRestingFc();

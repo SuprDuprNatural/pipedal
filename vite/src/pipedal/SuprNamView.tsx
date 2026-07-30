@@ -376,13 +376,23 @@ const SuprNamView =
 
                 const info = this.state.slotInfo[slot];
 
-                let rows: (string | ReactNode)[][] = [];
+                let rows: PanelSection["rows"] = [];
                 if (modelNode)
                     rows.push([modelNode]);
                 // Drive first: on a plugin running models side by side it is
                 // the control you reach for before any of the others.
-                rows.push(["drive" + name, "level" + name]);
-                rows.push(["slim" + name, "polarity" + name, "delay" + name]);
+                rows.push([
+                    { supr: "drive" + name, marks: "home" },
+                    {
+                        supr: "level" + name, step: 3,
+                        showReadout: true, showPointer: true
+                    }
+                ]);
+                rows.push([
+                    "slim" + name,
+                    "polarity" + name,
+                    { supr: "delay" + name, marks: "home" }
+                ]);
 
                 if (info.loaded && (!info.hasInputLevel || !info.hasLoudness)) {
                     const missing = !info.hasInputLevel && !info.hasLoudness
@@ -412,8 +422,14 @@ const SuprNamView =
                     sections.push({
                         label: "Filters",
                         rows: [
-                            ["inHp" + name, "inLp" + name],
-                            ["outHp" + name, "outLp" + name],
+                            [
+                                { supr: "inHp" + name, marks: "home" },
+                                { supr: "inLp" + name, marks: "home" }
+                            ],
+                            [
+                                { supr: "outHp" + name, marks: "home" },
+                                { supr: "outLp" + name, marks: "home" }
+                            ],
                         ]
                     });
                 }
@@ -440,13 +456,13 @@ const SuprNamView =
                 // meaningful when there is a pair to crossfade, so it is
                 // labelled with the actual letters and dropped when there is
                 // not — a dead knob is worse than no knob.
-                let routingRows: (string | ReactNode)[][] = [
+                let routingRows: PanelSection["rows"] = [
                     [(<SuprNamFlow key="flow" routing={routing} loaded={loaded}
                         threaded={threaded} />)],
-                    ["routing"],
+                    [{ supr: "routing", wide: true }],
                 ];
                 if (pair) {
-                    routingRows.push(["blend", "mixLaw"]);
+                    routingRows.push([{ supr: "blend", marks: "home" }, "mixLaw"]);
                 } else {
                     routingRows.push([(
                         <Typography key="noblend" variant="caption"
@@ -477,12 +493,24 @@ const SuprNamView =
                 // control that replaced it.
                 columns.push({
                     sections: [
-                        { label: "Amp", rows: [["inputGain", "outputGain"], ["gate", "threaded"]] },
+                        {
+                            label: "Amp",
+                            rows: [
+                                [
+                                    { supr: "inputGain", marks: "home" },
+                                    { supr: "outputGain", marks: "home" }
+                                ],
+                                [{ supr: "gate", marks: "home" }, "threaded"]
+                            ]
+                        },
                     ]
                 });
 
                 return [(
                     <SuprPanelUnit key="supr_nam_panel" columns={columns} nodes={nodes}
+                        instanceId={this.props.instanceId}
+                        uri={this.props.item.uri}
+                        controlValues={values}
                         tallControl={true} />
                 )];
             }

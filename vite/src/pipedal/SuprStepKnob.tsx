@@ -51,6 +51,12 @@ export interface SuprStepKnobProps {
     /** Suffix on the readout and the hover title. */
     unit?: string;
     variant?: SuprStepKnobVariant;
+    /** Keep the minimal no-pointer face, but spell out the snapped value. */
+    showReadout?: boolean;
+    /** Value restored by double-click. */
+    defaultValue?: number;
+    /** Port-aware display formatting, including scale-point labels. */
+    formatValue?: (value: number) => string;
 }
 
 // Vertical travel for one detent. Loose enough that a step is deliberate,
@@ -61,20 +67,23 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
     const {
         instanceId, symbol, value,
         label, step = 3, min = -12, max = 12, size = 44,
-        unit = "dB", variant = "minimal"
+        unit = "dB", variant = "minimal", showReadout = false,
+        defaultValue = 0, formatValue
     } = props;
 
     const model: PiPedalModel = PiPedalModelFactory.getInstance();
     const dark = isDarkMode();
 
     const snap = React.useCallback((v: number) => {
-        const s = Math.round(v / step) * step;
+        const s = min + Math.round((v - min) / step) * step;
         return Math.max(min, Math.min(max, s));
     }, [step, min, max]);
 
     // The drag's own origin, so a drag is measured from where it started
     // rather than accumulating rounding as it goes.
-    const drag = React.useRef<{ y: number; from: number } | null>(null);
+    const drag = React.useRef<{
+        pointerId: number; y: number; from: number; value: number;
+    } | null>(null);
     const [live, setLive] = React.useState<number | null>(null);
 
     const shown = snap(live !== null ? live : value);
@@ -91,29 +100,74 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
     };
 
     const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-        drag.current = { y: e.clientY, from: shown };
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        drag.current = {
+            pointerId: e.pointerId, y: e.clientY, from: shown, value: shown
+        };
         e.preventDefault();
+        e.stopPropagation();
     };
     const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-        if (!drag.current)
+        const current = drag.current;
+        if (!current || current.pointerId !== e.pointerId)
             return;
-        const dy = drag.current.y - e.clientY;   // up = more
-        commit(drag.current.from + (dy / PX_PER_STEP) * step, false);
+        const dy = current.y - e.clientY;   // up = more
+        current.value = snap(current.from + (dy / PX_PER_STEP) * step);
+        commit(current.value, false);
+        e.preventDefault();
+        e.stopPropagation();
     };
-    const onPointerUp = () => {
-        if (!drag.current)
+    const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+        const current = drag.current;
+        if (!current || current.pointerId !== e.pointerId)
             return;
         drag.current = null;
         // The drag already snapped every move; release just makes the value
         // the server's rather than a preview.
-        commit(shown, true);
+        commit(current.value, true);
+        e.preventDefault();
+        e.stopPropagation();
     };
     const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
         e.preventDefault();
+        e.stopPropagation();
         commit(shown + (e.deltaY < 0 ? step : -step), true);
     };
-    const onDoubleClick = () => commit(0, true);
+    const onDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        commit(defaultValue, true);
+        e.preventDefault();
+        e.stopPropagation();
+    };
+    const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+        let next: number;
+        switch (e.key) {
+            case "ArrowUp":
+            case "ArrowRight":
+                next = shown + step;
+                break;
+            case "ArrowDown":
+            case "ArrowLeft":
+                next = shown - step;
+                break;
+            case "PageUp":
+                next = shown + step * 3;
+                break;
+            case "PageDown":
+                next = shown - step * 3;
+                break;
+            case "Home":
+                next = min;
+                break;
+            case "End":
+                next = max;
+                break;
+            default:
+                return;
+        }
+        commit(next, true);
+        e.preventDefault();
+        e.stopPropagation();
+    };
 
     // Geometry: a 270-degree sweep, zero at the top, which is how a trim with
     // a centre detent reads at a glance.
@@ -143,25 +197,47 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
     }
 
     const sign = shown > 0 ? "+" : "";
-    const reading = `${sign}${shown}${unit ? " " + unit : ""}`;
+    const reading = formatValue
+        ? formatValue(shown)
+        : `${sign}${shown}${unit ? " " + unit : ""}`;
     return (
         <div style={{
-            width: size + 18, display: "flex", flexFlow: "column nowrap",
+            width: 80, display: "flex", flexFlow: "column nowrap",
             alignItems: "center", userSelect: "none", touchAction: "none"
         }}>
-            {label && (
-                <div style={{ fontSize: 11, color: text, marginBottom: 2 }}>
-                    {label}
-                </div>
-            )}
+            <style>{`
+                .supr-step-knob-input:focus { outline: none; }
+                .supr-step-knob-input:focus-visible {
+                    outline: 2px solid ${tickOn};
+                    outline-offset: 2px;
+                    border-radius: 3px;
+                }
+            `}</style>
+            <div style={{
+                height: 20, display: "flex", alignItems: "center",
+                fontSize: 11, color: text
+            }}>
+                {label}
+            </div>
             <div
+                className="supr-step-knob-input"
+                role="slider"
+                tabIndex={0}
+                aria-label={label ?? symbol}
+                aria-valuemin={min}
+                aria-valuemax={max}
+                aria-valuenow={shown}
+                aria-valuetext={reading}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
                 onWheel={onWheel}
                 onDoubleClick={onDoubleClick}
-                style={{ cursor: "ns-resize", lineHeight: 0 }}
+                onKeyDown={onKeyDown}
+                style={{
+                    cursor: "ns-resize", lineHeight: 0, outlineOffset: 2
+                }}
                 title={`${label ?? symbol} ${reading}`}
             >
                 <svg width={size + 14} height={size + 14}
@@ -179,7 +255,7 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
                     )}
                 </svg>
             </div>
-            {variant === "full" && (
+            {(variant === "full" || showReadout) && (
                 <div style={{ fontSize: 11, color: text, marginTop: 1 }}>
                     {reading}
                 </div>

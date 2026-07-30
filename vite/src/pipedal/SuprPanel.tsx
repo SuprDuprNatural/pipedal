@@ -22,6 +22,8 @@ import React, { ReactNode } from 'react';
 import Typography from '@mui/material/Typography';
 import { ControlGroup } from './PluginControlView';
 import { PiPedalModel } from './PiPedalModel';
+import SuprControl from './SuprControl';
+import { SuprKnobMarks } from './SuprKnob';
 
 // A row entry of { compactSelect: "symbol" } renders that port's dropdown
 // narrow and unlabelled; see compactSelect() below.
@@ -29,11 +31,45 @@ export interface CompactSelectItem {
     compactSelect: string;
 }
 
+// A row entry of { supr: "symbol" } asks the shared dispatcher for the Supr
+// rendering of that port. Unsupported types retain their stock node.
+export interface SuprControlItem {
+    supr: string;
+    marks?: SuprKnobMarks;
+    markCount?: number;
+    step?: number;
+    showReadout?: boolean;
+    showPointer?: boolean;
+    compact?: boolean;
+    wide?: boolean;
+    hideLabel?: boolean;
+    buttonText?: string;
+}
+
+// A small piece of nested panel geometry. This lets a face place, for
+// example, a meter above four knobs beside a vertical stack of three knobs,
+// while the whole arrangement still belongs to one section (and therefore
+// has no artificial wall through the middle).
+export interface PanelGroupItem {
+    panelGroup: "row" | "column";
+    items: PanelItem[];
+    label?: string;
+    gap?: number;
+    justify?: "flex-start" | "center" | "flex-end" | "space-between"
+        | "space-around" | "space-evenly";
+    align?: "flex-start" | "center" | "flex-end" | "stretch";
+    stretch?: boolean;
+    width?: number;
+}
+
+export type PanelItem =
+    string | CompactSelectItem | SuprControlItem | PanelGroupItem | ReactNode;
+
 export interface PanelSection {
     label?: string;
     // rows of port symbols (resolved via mapControlNodes), ready nodes, or
     // a compact-select request
-    rows: (string | CompactSelectItem | ReactNode)[][];
+    rows: PanelItem[][];
     // put the label under the rows instead of above (TooB alternates these)
     labelBottom?: boolean;
     // drop the empty label slot entirely. Only for a unit whose sections are
@@ -45,6 +81,14 @@ export interface PanelSection {
     // packed; a synth face wants each section to read as its own panel, and
     // that is mostly a matter of the space around them.
     roomy?: boolean;
+    // Centre a short stack within a neighbouring taller strip.
+    centerRows?: boolean;
+    // Give every row an equal share of the section's height.
+    spreadRows?: boolean;
+    // Alignment and spacing of the immediate rows. Nested PanelGroupItems
+    // handle the more detailed geometry inside them.
+    rowAlign?: "flex-start" | "center" | "flex-end" | "stretch";
+    rowGap?: number;
 }
 
 export interface PanelColumn {
@@ -188,8 +232,107 @@ function sectionLabel(section: PanelSection): ReactNode {
     );
 }
 
+function groupLabel(label: string): ReactNode {
+    return (
+        <div style={{
+            height: LABEL_SLOT, display: "flex", alignItems: "center",
+            justifyContent: "center", flex: "0 0 auto"
+        }}>
+            <Typography variant="body1" noWrap style={{
+                fontSize: "0.85em", fontWeight: 700,
+                opacity: 0.4, textAlign: "center"
+            }}>{label}</Typography>
+        </div>
+    );
+}
+
+interface SuprControlContext {
+    instanceId: number;
+    uri: string;
+    controlValues: { [symbol: string]: number };
+}
+
+function renderPanelItem(item: PanelItem,
+    nodes: { [symbol: string]: ReactNode }, key: string,
+    suprContext?: SuprControlContext): ReactNode {
+    if (item && typeof item === "object"
+        && "panelGroup" in (item as object)) {
+        const group = item as PanelGroupItem;
+        return (
+            <div key={key} style={{
+                display: "flex",
+                flexFlow: group.panelGroup === "row"
+                    ? "row nowrap" : "column nowrap",
+                justifyContent: group.justify ?? "center",
+                alignItems: group.align ?? "center",
+                alignSelf: group.stretch ? "stretch" : undefined,
+                gap: group.gap,
+                width: group.width,
+                flex: "0 0 auto"
+            }}>
+                {group.label && groupLabel(group.label)}
+                {group.items.map((child, index) =>
+                    renderPanelItem(child, nodes, `${key}_${index}`, suprContext)
+                )}
+            </div>
+        );
+    }
+
+    let content: ReactNode;
+    if (typeof item === "string") {
+        content = suprContext ? (
+            <SuprControl
+                instanceId={suprContext.instanceId}
+                uri={suprContext.uri}
+                symbol={item}
+                value={suprContext.controlValues[item]}
+                fallback={nodes[item]} />
+        ) : nodes[item];
+    } else if (item && typeof item === "object"
+        && "compactSelect" in (item as object)) {
+        const sym = (item as CompactSelectItem).compactSelect;
+        content = suprContext ? (
+            <SuprControl
+                instanceId={suprContext.instanceId}
+                uri={suprContext.uri}
+                symbol={sym}
+                value={suprContext.controlValues[sym]}
+                fallback={compactSelect(nodes[sym], "cs_" + sym)}
+                compact />
+        ) : compactSelect(nodes[sym], "cs_" + sym);
+    } else if (item && typeof item === "object"
+        && "supr" in (item as object)) {
+        const request = item as SuprControlItem;
+        content = suprContext ? (
+            <SuprControl
+                instanceId={suprContext.instanceId}
+                uri={suprContext.uri}
+                symbol={request.supr}
+                value={suprContext.controlValues[request.supr]}
+                fallback={nodes[request.supr]}
+                marks={request.marks}
+                markCount={request.markCount}
+                step={request.step}
+                showReadout={request.showReadout}
+                showPointer={request.showPointer}
+                compact={request.compact}
+                wide={request.wide}
+                hideLabel={request.hideLabel}
+                buttonText={request.buttonText} />
+        ) : nodes[request.supr];
+    } else {
+        content = item as ReactNode;
+    }
+    return (
+        <div key={key} style={{ flex: "0 0 auto" }}>
+            {content}
+        </div>
+    );
+}
+
 function renderSection(section: PanelSection,
-    nodes: { [symbol: string]: ReactNode }, key: number, first: boolean): ReactNode {
+    nodes: { [symbol: string]: ReactNode }, key: number, first: boolean,
+    suprContext?: SuprControlContext): ReactNode {
     return (
         <div key={key} style={{
             flex: "1 0 auto",
@@ -199,7 +342,8 @@ function renderSection(section: PanelSection,
             // section's label to a different height, which reads as broken
             // even though the grouping is right. Where the columns are the
             // same height this is identical to centring.
-            justifyContent: "flex-start", alignItems: "center",
+            justifyContent: section.centerRows ? "center" : "flex-start",
+            alignItems: "center",
             borderTop: first ? undefined : WALL,
             paddingLeft: section.roomy ? 14 : 6,
             paddingRight: section.roomy ? 14 : 6,
@@ -210,25 +354,15 @@ function renderSection(section: PanelSection,
             {section.rows.map((row, ri) => (
                 <div key={ri} style={{
                     display: "flex", flexFlow: "row nowrap",
-                    justifyContent: "center", alignItems: "flex-start"
+                    justifyContent: "center",
+                    alignItems: section.rowAlign
+                        ?? (section.spreadRows ? "center" : "flex-start"),
+                    flex: section.spreadRows ? "1 1 0" : undefined,
+                    gap: section.rowGap
                 }}>
-                    {row.map((item, ci) => {
-                        let content: ReactNode;
-                        if (typeof item === "string") {
-                            content = nodes[item];
-                        } else if (item && typeof item === "object"
-                            && "compactSelect" in (item as object)) {
-                            const sym = (item as CompactSelectItem).compactSelect;
-                            content = compactSelect(nodes[sym], "cs_" + sym);
-                        } else {
-                            content = item as ReactNode;
-                        }
-                        return (
-                            <div key={ci} style={{ flex: "0 0 auto" }}>
-                                {content}
-                            </div>
-                        );
-                    })}
+                    {row.map((item, ci) =>
+                        renderPanelItem(item, nodes, `${key}_${ri}_${ci}`, suprContext)
+                    )}
                 </div>
             ))}
             {section.labelBottom && sectionLabel(section)}
@@ -239,6 +373,9 @@ function renderSection(section: PanelSection,
 interface SuprPanelUnitProps {
     columns: PanelColumn[];
     nodes: { [symbol: string]: ReactNode };
+    instanceId?: number;
+    uri?: string;
+    controlValues?: { [symbol: string]: number };
     // Full-width row across the top of the unit, above the columns — for a
     // readout that belongs to the whole pedal rather than to one section.
     // The columns' own top walls become the rule beneath it.
@@ -272,6 +409,16 @@ export class SuprPanelUnit extends React.Component<SuprPanelUnitProps, { windowW
 
     render() {
         const maxWidth = Math.max(this.state.windowWidth - PANEL_WINDOW_MARGIN, 300);
+        const suprContext: SuprControlContext | undefined =
+            this.props.instanceId !== undefined
+                && this.props.uri !== undefined
+                && this.props.controlValues !== undefined
+                ? {
+                    instanceId: this.props.instanceId,
+                    uri: this.props.uri,
+                    controlValues: this.props.controlValues
+                }
+                : undefined;
         return (
             <div style={{
                 display: "flex", flexFlow: "row nowrap",
@@ -319,7 +466,10 @@ export class SuprPanelUnit extends React.Component<SuprPanelUnitProps, { windowW
                                 marginTop: -4, borderTop: WALL
                             }}>
                                 {column.sections.map((section, si) =>
-                                    renderSection(section, this.props.nodes, si, si === 0))}
+                                    renderSection(
+                                        section, this.props.nodes, si, si === 0,
+                                        suprContext
+                                    ))}
                             </div>
                         ))}
                     </div>

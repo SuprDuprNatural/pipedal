@@ -200,7 +200,7 @@ export default class SuprTunerDisplay
         return (
             <div style={{
                 width, height, position: "relative",
-                marginBottom: 20, marginRight: 12,
+                marginBottom: 10,
                 borderRadius: 6, overflow: "hidden",
                 boxShadow: "5px 5px 6px rgba(0,0,0,0.8) inset",
                 background: "#050705"
