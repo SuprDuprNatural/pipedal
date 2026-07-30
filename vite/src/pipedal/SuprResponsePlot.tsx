@@ -59,7 +59,7 @@ const V_LABELS: { [f: number]: string } = { 100: "100", 1000: "1k", 10000: "10k"
 // curve tracks dial drags (previews go to the RT engine, not the model).
 const MONITOR_SYMBOLS: { [v in ResponseVariant]: string[] } = {
     envfilter: ["fc", "mode", "dir", "cutoff", "range", "res", "blend", "level"],
-    octaveplus: ["fc", "note", "samp", "tone", "cutoff", "res", "synthoct"],
+    octaveplus: ["fc", "note", "samp", "tone", "cutoff", "res", "osc1oct", "osc2oct", "osc2level"],
 };
 
 // ---------------------------------------------------------------------------
@@ -250,7 +250,9 @@ const SuprResponsePlot =
                 const res = this.value("res", 0.3);
                 const cutoff = this.value("cutoff", 900);
                 const tone = this.value("tone", 550);
-                const synthoct = Math.round(this.value("synthoct", 0));
+                const osc1oct = Math.round(this.value("osc1oct", 0));
+                const osc2oct = Math.round(this.value("osc2oct", 0));
+                const osc2on = this.value("osc2level", 0) > 0.001;
                 const liveFcRaw = this.state.live["fc"];
                 const fcLive = (liveFcRaw !== undefined && liveFcRaw > 0) ? liveFcRaw : cutoff;
                 const note = Math.max(this.value("note", 55), 10);
@@ -260,9 +262,14 @@ const SuprResponsePlot =
                 const markers: { f: number; label: string; opacity: number; color: string }[] = [
                     { f: note, label: "note", opacity: 0.5, color: textColor },
                     { f: note / 2, label: "-1", opacity: 0.5, color: second },
-                    { f: note / 4, label: "-2", opacity: 0.5, color: second },
-                    { f: note * Math.pow(2, synthoct), label: "syn", opacity: 0.25 + 0.75 * samp, color: accent },
+                    { f: note * Math.pow(2, osc1oct), label: "1", opacity: 0.25 + 0.75 * samp, color: accent },
                 ];
+                // osc 2 only earns a marker when it is actually audible
+                if (osc2on)
+                    markers.push({
+                        f: note * Math.pow(2, osc2oct), label: "2",
+                        opacity: 0.25 + 0.75 * samp, color: accent
+                    });
                 for (let m of markers) {
                     if (m.f < FMIN || m.f > FMAX)
                         continue;

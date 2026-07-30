@@ -7,6 +7,7 @@
 //
 // Layout model:
 //   unit    = wrapping flex row of COLUMNS (4px #888 border, like TooB)
+//   header  = optional full-width row across the top, above every column
 //   column  = vertical stack of SECTIONS (4px left wall)
 //   section = label slot + rows of controls (4px top wall between stacked
 //             sections)
@@ -22,12 +23,28 @@ import Typography from '@mui/material/Typography';
 import { ControlGroup } from './PluginControlView';
 import { PiPedalModel } from './PiPedalModel';
 
+// A row entry of { compactSelect: "symbol" } renders that port's dropdown
+// narrow and unlabelled; see compactSelect() below.
+export interface CompactSelectItem {
+    compactSelect: string;
+}
+
 export interface PanelSection {
     label?: string;
-    // rows of port symbols (resolved via mapControlNodes) or ready nodes
-    rows: (string | ReactNode)[][];
+    // rows of port symbols (resolved via mapControlNodes), ready nodes, or
+    // a compact-select request
+    rows: (string | CompactSelectItem | ReactNode)[][];
     // put the label under the rows instead of above (TooB alternates these)
     labelBottom?: boolean;
+    // drop the empty label slot entirely. Only for a unit whose sections are
+    // ALL unlabelled — the slot exists to keep knob rows aligned across
+    // neighbouring sections, so removing it from one of a labelled set would
+    // step that section's knobs out of line with the rest.
+    noLabelSlot?: boolean;
+    // Give the section room to breathe. A pedal face wants its controls
+    // packed; a synth face wants each section to read as its own panel, and
+    // that is mostly a matter of the space around them.
+    roomy?: boolean;
 }
 
 export interface PanelColumn {
@@ -38,6 +55,43 @@ export interface PanelColumn {
 
 const WALL = "4px solid #888";
 const LABEL_SLOT = 20;
+
+// A dropdown whose label is redundant — the control beside it already says
+// what it belongs to — rendered narrow and without its caption. The standard
+// control is 160px wide with a 140px Select, sized for the longest label any
+// plugin might use; ours are four waveform names, and "Triangle" is the
+// longest. Done in CSS over the standard node rather than by rendering our
+// own Select, so the value binding, theming and disabled states stay exactly
+// the host's.
+//
+// Selected by STRUCTURE, not by class name: PluginControl's styles come from
+// emotion, so the generated names are hashes like `css-1icnxvz` with nothing
+// of the source key left in them. The frame's first child is the caption and
+// its second is the control, and that is what these rules rely on.
+//
+// The caption is hidden with `visibility`, not `display`: it still has to
+// occupy its 20px, or the dropdown rides up and stops lining up with the
+// captioned knobs sitting beside it in the same row.
+// Sized from the content rather than by eye: "Triangle" is the longest of the
+// four waveform names and measures 50px at the control's 14px Roboto, and the
+// dropdown arrow takes a further 24px. 76px fits both, which puts the column
+// at the same 80-odd pixels as the knobs beside it so the dropdown stops
+// stretching the section it sits in.
+export const COMPACT_SELECT_CLASS = "supr-compact-select";
+const compactSelectCss = `
+.${COMPACT_SELECT_CLASS} > div { width: 84px !important; }
+.${COMPACT_SELECT_CLASS} > div > div:first-of-type { visibility: hidden !important; }
+.${COMPACT_SELECT_CLASS} .MuiInputBase-root { width: 76px !important; }
+`;
+
+export function compactSelect(node: ReactNode, key: string): ReactNode {
+    return (
+        <div key={key} className={COMPACT_SELECT_CLASS}>
+            <style>{compactSelectCss}</style>
+            {node}
+        </div>
+    );
+}
 
 // Build symbol -> control-node map from the (ReactNode | ControlGroup)[] that
 // PluginControlView hands to modifyControls. Grouped controls carry their
@@ -120,6 +174,8 @@ export function mapExtraNodes(
 function sectionLabel(section: PanelSection): ReactNode {
     // A fixed-height slot whether or not there's text, so knob rows align
     // across neighbouring sections.
+    if (section.noLabelSlot && !section.label)
+        return null;
     return (
         <div style={{ height: LABEL_SLOT, display: "flex", alignItems: "center" }}>
             {section.label && (
@@ -138,10 +194,17 @@ function renderSection(section: PanelSection,
         <div key={key} style={{
             flex: "1 0 auto",
             display: "flex", flexFlow: "column nowrap",
-            justifyContent: "center", alignItems: "center",
+            // Top-aligned, not centred: in a stacked face the columns hold
+            // different numbers of controls, and centring floats each
+            // section's label to a different height, which reads as broken
+            // even though the grouping is right. Where the columns are the
+            // same height this is identical to centring.
+            justifyContent: "flex-start", alignItems: "center",
             borderTop: first ? undefined : WALL,
-            paddingLeft: 6, paddingRight: 6,
-            paddingTop: 2, paddingBottom: 4
+            paddingLeft: section.roomy ? 14 : 6,
+            paddingRight: section.roomy ? 14 : 6,
+            paddingTop: section.roomy ? 8 : 2,
+            paddingBottom: section.roomy ? 14 : 4
         }}>
             {!section.labelBottom && sectionLabel(section)}
             {section.rows.map((row, ri) => (
@@ -149,11 +212,23 @@ function renderSection(section: PanelSection,
                     display: "flex", flexFlow: "row nowrap",
                     justifyContent: "center", alignItems: "flex-start"
                 }}>
-                    {row.map((item, ci) => (
-                        <div key={ci} style={{ flex: "0 0 auto" }}>
-                            {typeof item === "string" ? nodes[item] : item}
-                        </div>
-                    ))}
+                    {row.map((item, ci) => {
+                        let content: ReactNode;
+                        if (typeof item === "string") {
+                            content = nodes[item];
+                        } else if (item && typeof item === "object"
+                            && "compactSelect" in (item as object)) {
+                            const sym = (item as CompactSelectItem).compactSelect;
+                            content = compactSelect(nodes[sym], "cs_" + sym);
+                        } else {
+                            content = item as ReactNode;
+                        }
+                        return (
+                            <div key={ci} style={{ flex: "0 0 auto" }}>
+                                {content}
+                            </div>
+                        );
+                    })}
                 </div>
             ))}
             {section.labelBottom && sectionLabel(section)}
@@ -164,6 +239,10 @@ function renderSection(section: PanelSection,
 interface SuprPanelUnitProps {
     columns: PanelColumn[];
     nodes: { [symbol: string]: ReactNode };
+    // Full-width row across the top of the unit, above the columns — for a
+    // readout that belongs to the whole pedal rather than to one section.
+    // The columns' own top walls become the rule beneath it.
+    header?: ReactNode;
     // read by PluginControlView: opt out of the fixed-height control slot
     tallControl?: boolean;
 }
@@ -199,28 +278,51 @@ export class SuprPanelUnit extends React.Component<SuprPanelUnitProps, { windowW
                 justifyContent: "center", width: "100%", maxWidth: maxWidth
             }}>
                 <div style={{
+                    // A COLUMN: the optional header stacks above the row of
+                    // panel columns. Deliberately not one row-wrap container
+                    // with a `flex: 0 0 100%` header — a percentage basis
+                    // resolves against a container that is itself sizing to
+                    // its content, and the circularity blows the unit out
+                    // far wider than its columns.
                     flex: "0 1 auto", maxWidth: maxWidth,
-                    display: "flex", flexFlow: "row wrap",
-                    alignItems: "stretch", justifyContent: "center",
+                    display: "flex", flexFlow: "column nowrap",
+                    alignItems: "stretch",
                     border: "4px #888 solid", borderRadius: 8,
                     overflow: "hidden", marginBottom: 8
                 }}>
-                    {this.props.columns.map((column, i) => (
-                        <div key={i} style={{
-                            // content-hugging: the unit is exactly as wide as
-                            // its sections, like the TooB EQ face
-                            flex: "0 0 auto",
-                            display: "flex", flexFlow: "column nowrap",
-                            alignItems: "stretch",
-                            borderLeft: i === 0 ? undefined : WALL,
-                            // merges into the outer border on the first row;
-                            // separates wrapped rows below it
-                            marginTop: -4, borderTop: WALL
+                    {this.props.header && (
+                        <div style={{
+                            display: "flex", justifyContent: "center",
+                            alignItems: "center",
+                            // the columns below pull up 4px onto their own
+                            // top wall, which is what draws the rule here
+                            paddingTop: 8, paddingBottom: 10
                         }}>
-                            {column.sections.map((section, si) =>
-                                renderSection(section, this.props.nodes, si, si === 0))}
+                            {this.props.header}
                         </div>
-                    ))}
+                    )}
+                    <div style={{
+                        display: "flex", flexFlow: "row wrap",
+                        alignItems: "stretch", justifyContent: "center"
+                    }}>
+                        {this.props.columns.map((column, i) => (
+                            <div key={i} style={{
+                                // content-hugging: the unit is exactly as wide
+                                // as its sections, like the TooB EQ face
+                                flex: "0 0 auto",
+                                display: "flex", flexFlow: "column nowrap",
+                                alignItems: "stretch",
+                                borderLeft: i === 0 ? undefined : WALL,
+                                // merges into the outer border (or the header's
+                                // bottom padding) on the first row; separates
+                                // wrapped rows below it
+                                marginTop: -4, borderTop: WALL
+                            }}>
+                                {column.sections.map((section, si) =>
+                                    renderSection(section, this.props.nodes, si, si === 0))}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         );

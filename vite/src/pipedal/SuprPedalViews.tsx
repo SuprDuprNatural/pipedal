@@ -16,6 +16,9 @@ import PluginControlView, { ICustomizationHost, ControlGroup, ControlViewCustomi
 import SuprMeterControl, { MeterTick } from './SuprMeterControl';
 import SuprResponsePlot from './SuprResponsePlot';
 import SuprTunerDisplay from './SuprTunerDisplay';
+import SuprTransientDisplay from './SuprTransientDisplay';
+import SuprStepKnob from './SuprStepKnob';
+import SuprChorusDisplay from './SuprChorusDisplay';
 import { PanelColumn, SuprPanelUnit, mapControlNodes } from './SuprPanel';
 import ToobSpectrumResponseView from './ToobSpectrumResponseView';
 
@@ -25,6 +28,11 @@ const SUPR_OCTAVE_URI = "https://suprduprnatural.github.io/supr-pedals/octave";
 const SUPR_OCTAVE_PLUS_URI = "https://suprduprnatural.github.io/supr-pedals/octave-plus";
 const SUPR_ENV_FILTER_URI = "https://suprduprnatural.github.io/supr-pedals/envelope-filter";
 const SUPR_TUNER_URI = "https://suprduprnatural.github.io/supr-pedals/tuner";
+const SUPR_TRANSIENT_URI = "https://suprduprnatural.github.io/supr-pedals/transient";
+const SUPR_CHORUS_URI = "https://suprduprnatural.github.io/supr-pedals/chorus";
+const SUPR_SANS_URI = "https://suprduprnatural.github.io/supr-pedals/sans";
+const SUPR_FUZZ_URI = "https://suprduprnatural.github.io/supr-pedals/fuzz";
+const SUPR_BAND_URI = "https://suprduprnatural.github.io/supr-pedals/multiband";
 
 const styles = (theme: Theme) => createStyles({});
 
@@ -294,7 +302,14 @@ interface PanelContext {
     // current control values, for the response plots
     controlValues: { [symbol: string]: number };
 }
-type PanelBuilder = (ctx: PanelContext) => PanelColumn[];
+// A builder returns the unit's columns, or — when the pedal has a readout
+// belonging to the whole unit rather than to one section — a header node and
+// the columns that sit under it.
+interface PanelSpec {
+    header?: React.ReactNode;
+    columns: PanelColumn[];
+}
+type PanelBuilder = (ctx: PanelContext) => PanelColumn[] | PanelSpec;
 
 function makePanelView(builder: PanelBuilder) {
     return withStyles(
@@ -329,12 +344,15 @@ function makePanelView(builder: PanelBuilder) {
             modifyControls(host: ICustomizationHost,
                 controls: (React.ReactNode | ControlGroup)[]): (React.ReactNode | ControlGroup)[] {
                 const nodes = mapControlNodes(this.model, this.props.item.uri, controls);
-                const columns = builder({
+                const built = builder({
                     instanceId: this.props.instanceId,
                     controlValues: this.currentControlValues()
                 });
+                const spec: PanelSpec =
+                    Array.isArray(built) ? { columns: built } : built;
                 return [(
-                    <SuprPanelUnit key="supr_panel" columns={columns} nodes={nodes}
+                    <SuprPanelUnit key="supr_panel" columns={spec.columns}
+                        header={spec.header} nodes={nodes}
                         tallControl={true} />
                 )];
             }
@@ -354,24 +372,85 @@ function makePanelView(builder: PanelBuilder) {
     );
 }
 
+// The faces below are stacked rather than laid out in one long row: sections
+// become columns, and a section wider than a pair of controls wraps onto a
+// second line instead of running off to the right. The target is a face that
+// is roughly as tall as it is wide. Pure one-per-row columns were tried and
+// are worse — anything with more than four controls turns into a ladder.
 const SuprOctaveView = makePanelView(() => [
-    { sections: [{ label: "Mix", rows: [["direct", "oct1", "oct2"]] }] },
-    { sections: [{ label: "Sub", rows: [["tone", "gate"]] }] },
+    { sections: [{ label: "Mix", rows: [["direct", "oct1"], ["oct2"]] }] },
+    { sections: [{ label: "Sub", rows: [["tone"], ["gate"]] }] },
 ]);
 
+// This one is not a pedal and should not look like one. Twenty-one controls
+// across four genuinely different jobs is a SYNTHESISER, so it gets a synth's
+// face: the display tucked into the top left with the octave voices beneath
+// it, and Synth, Filter and Envelope each given a full-height room of its own
+// down the rest of the panel. Every section is roomy, and the three on the
+// right run the whole height of the unit rather than being packed to their
+// contents — which is what makes them read as panels instead of as rows.
 const SuprOctavePlusView = makePanelView((ctx) => [
     {
-        grow: 0, sections: [{
-            rows: [[(
-                <SuprResponsePlot key="plot" instanceId={ctx.instanceId}
-                    variant="octaveplus" controls={ctx.controlValues} frameless />
-            )]]
+        sections: [
+            {
+                noLabelSlot: true, roomy: true, rows: [[(
+                    <SuprResponsePlot key="plot" instanceId={ctx.instanceId}
+                        variant="octaveplus" controls={ctx.controlValues} frameless />
+                )]]
+            },
+            { label: "Mixer", roomy: true, rows: [["direct", "gate"], ["oct1", "tone"]] },
+        ]
+    },
+    {
+        // One row per oscillator — level, octave, waveform — so the two read
+        // as a pair rather than as six unrelated controls, with the shared
+        // pitch controls under them. The waveform dropdowns drop their
+        // captions: the knob to their left already names the oscillator.
+        sections: [{
+            label: "Synth", roomy: true,
+            rows: [["osc1level", "osc1oct", { compactSelect: "osc1wave" }],
+            ["osc2level", "osc2oct", { compactSelect: "osc2wave" }],
+            ["detune", "glide"]]
         }]
     },
-    { sections: [{ label: "Octaves", rows: [["direct", "oct1", "oct2"], ["tone", "gate"]] }] },
-    { sections: [{ label: "Synth", rows: [["synth", "wave", "synthoct"], ["detune", "glide"]] }] },
-    { sections: [{ label: "Filter", rows: [["cutoff", "res", "envmod"], ["keytrack", "fattack", "fdecay"]] }] },
-    { sections: [{ label: "Envelope", rows: [["envmode", "attack", "decay"], ["sustain", "release"]] }] },
+    { sections: [{ label: "Filter", roomy: true, rows: [["cutoff", "res"], ["envmod", "keytrack"], ["fattack", "fdecay"]] }] },
+]);
+
+// Drive and the tone stack down the left, the two voicing switches and the
+// output trim down the right. The tone stack is the only section big enough
+// to want two lines.
+const SuprSansView = makePanelView(() => [
+    {
+        sections: [
+            { label: "Drive", rows: [["drive", "blend"]] },
+            { label: "Tone", rows: [["bass", "mid"], ["midfreq", "treble"]] },
+        ]
+    },
+    {
+        sections: [
+            { label: "Filters", rows: [["air"], ["rumble"]] },
+            { label: "Output", rows: [["level"]] },
+        ]
+    },
+]);
+
+const SuprFuzzView = makePanelView(() => [
+    { sections: [{ label: "Fuzz", rows: [["sustain", "tone"], ["octave"]] }] },
+    { sections: [{ label: "Output", rows: [["gate", "blend"], ["level"]] }] },
+]);
+
+// Three identical band strips side by side, each read top to bottom, so the
+// same knob on each band is always at the same height and the three can be
+// compared at a glance. That is the whole reason this face is worth having,
+// so the strips keep their columns even though everything else here got
+// wider. Signal order across: the splits that make the bands, the bands, and
+// the blend and level that end them.
+const SuprBandView = makePanelView(() => [
+    { sections: [{ label: "Crossover", rows: [["split1"], ["split2"]] }] },
+    { sections: [{ label: "Low", rows: [["lowComp"], ["lowDrive"], ["lowLevel"]] }] },
+    { sections: [{ label: "Mid", rows: [["midComp"], ["midDrive"], ["midLevel"]] }] },
+    { sections: [{ label: "High", rows: [["highComp"], ["highDrive"], ["highLevel"]] }] },
+    { sections: [{ label: "Output", rows: [["blend"], ["level"]] }] },
 ]);
 
 const SuprEnvFilterView = makePanelView((ctx) => [
@@ -407,6 +486,62 @@ const SuprTunerView = makePanelView((ctx) => [
     },
 ]);
 
+// The transient face: the −/+ gain meter across the top, then the two
+// shaping knobs in their own column with the detector and output setup
+// beside them. Narrow and tall rather than wide — the meter is the only
+// thing that wants width, and it wants less of it than five knobs in a row.
+// No section labels: with five controls that all say what they are, they
+// would be decoration.
+const SuprTransientView = makePanelView((ctx) => ({
+    header: (
+        <SuprTransientDisplay key="supr_transient_display"
+            instanceId={ctx.instanceId} />
+    ),
+    columns: [
+        // HR sits under the two shaping knobs: it is what calibrates them to
+        // your rig, so it belongs with them rather than off in the metering
+        // area. It also evens the two columns at three rows each, and being
+        // visibly a different kind of knob is what says "set this once".
+        {
+            sections: [{
+                noLabelSlot: true,
+                rows: [["attack"], ["sustain"], [(
+                    <SuprStepKnob key="supr_transient_hr"
+                        instanceId={ctx.instanceId} symbol="hr"
+                        value={ctx.controlValues["hr"] ?? 0}
+                        label="HR" step={3} min={-12} max={12} />
+                )]]
+            }]
+        },
+        { sections: [{ noLabelSlot: true, rows: [["schpf"], ["focus"], ["level"]] }] },
+    ]
+}));
+
+// The display carries the whole state of the pedal, so the knobs sit under it
+// as one unlabelled 3x2 block. Modulation on the top row, band on the bottom.
+const SuprChorusView = makePanelView((ctx) => [
+    {
+        grow: 0, sections: [{
+            rows: [[(
+                <SuprChorusDisplay key="supr_chorus_display"
+                    instanceId={ctx.instanceId} controls={ctx.controlValues} />
+            )]]
+        }]
+    },
+    {
+        sections: [{
+            rows: [["rate", "depth", "voices"], ["low", "tone", "mix"]]
+        }]
+    },
+]);
+
+export class SuprChorusViewFactory implements IControlViewFactory {
+    uri: string = SUPR_CHORUS_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprChorusView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
 export class SuprCompressorViewFactory implements IControlViewFactory {
     uri: string = SUPR_COMPRESSOR_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
@@ -435,6 +570,27 @@ export class SuprOctavePlusViewFactory implements IControlViewFactory {
     }
 }
 
+export class SuprSansViewFactory implements IControlViewFactory {
+    uri: string = SUPR_SANS_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprSansView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+export class SuprFuzzViewFactory implements IControlViewFactory {
+    uri: string = SUPR_FUZZ_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprFuzzView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+export class SuprBandViewFactory implements IControlViewFactory {
+    uri: string = SUPR_BAND_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprBandView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
 export class SuprEnvFilterViewFactory implements IControlViewFactory {
     uri: string = SUPR_ENV_FILTER_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
@@ -446,6 +602,13 @@ export class SuprTunerViewFactory implements IControlViewFactory {
     uri: string = SUPR_TUNER_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
         return (<SuprTunerView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+export class SuprTransientViewFactory implements IControlViewFactory {
+    uri: string = SUPR_TRANSIENT_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprTransientView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
     }
 }
 
