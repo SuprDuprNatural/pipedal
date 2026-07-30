@@ -36,7 +36,7 @@ import ToobPlayerFactory from './ToobPlayerView';
 import ToobNamViewFactory from './ToobNamView';
 import ToobParametericEqViewFactory from './ToobParametricEqView';
 import {ToobParametricEqViewFactoryStereo} from './ToobParametricEqView';
-import { SuprCompressorViewFactory, SuprVuViewFactory, SuprSpectrumViewFactory, SuprOctaveViewFactory, SuprOctavePlusViewFactory, SuprEnvFilterViewFactory, SuprTunerViewFactory, SuprTransientViewFactory, SuprChorusViewFactory, SuprSansViewFactory, SuprFuzzViewFactory, SuprBandViewFactory } from './SuprPedalViews';
+import { SuprCompressorViewFactory, SuprVuViewFactory, SuprSpectrumViewFactory, SuprOctaveViewFactory, SuprOctavePlusViewFactory, SuprEnvFilterViewFactory, SuprTunerViewFactory, SuprTransientViewFactory, SuprChorusViewFactory, SuprSansViewFactory, SuprFuzzViewFactory, SuprBandViewFactory, SuprClackViewFactory } from './SuprPedalViews';
 import { SuprNamViewFactory } from './SuprNamView';
 
 
@@ -53,6 +53,7 @@ let pluginFactories: IControlViewFactory[] = [
     new SuprSansViewFactory(),
     new SuprFuzzViewFactory(),
     new SuprBandViewFactory(),
+    new SuprClackViewFactory(),
     new SuprSpectrumViewFactory(), // overrides the stock TooB spectrum view
     new GxTunerViewFactory(),
     new ToobPowerstage2ViewFactory(),

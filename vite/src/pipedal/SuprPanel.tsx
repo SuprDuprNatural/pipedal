@@ -137,6 +137,27 @@ export function compactSelect(node: ReactNode, key: string): ReactNode {
     );
 }
 
+// A file browser whose caption is redundant — the section it sits in
+// already names it. Same structural selector as compactSelect (the frame's
+// first child is its caption), but hidden with `display` rather than
+// `visibility`: this one is the top row of its own column rather than a
+// control sharing a row with captioned knobs, so there is no neighbour to
+// stay level with and the reserved slot is just a gap. The label stays in
+// the plugin's data, because it is what titles the file dialog.
+export const CAPTIONLESS_FILE_CLASS = "supr-captionless-file";
+const captionlessFileCss = `
+.${CAPTIONLESS_FILE_CLASS} > div > div:first-of-type { display: none !important; }
+`;
+
+export function captionlessFile(node: ReactNode, key: string): ReactNode {
+    return (
+        <div key={key} className={CAPTIONLESS_FILE_CLASS}>
+            <style>{captionlessFileCss}</style>
+            {node}
+        </div>
+    );
+}
+
 // Build symbol -> control-node map from the (ReactNode | ControlGroup)[] that
 // PluginControlView hands to modifyControls. Grouped controls carry their
 // port indexes; ungrouped ones are matched positionally against the plugin's

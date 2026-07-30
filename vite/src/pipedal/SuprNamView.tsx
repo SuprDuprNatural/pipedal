@@ -28,7 +28,7 @@ import IControlViewFactory from './IControlViewFactory';
 import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
 import { PedalboardItem } from './Pedalboard';
 import PluginControlView, { ICustomizationHost, ControlGroup, ControlViewCustomization } from './PluginControlView';
-import { PanelColumn, PanelSection, SuprPanelUnit, mapControlNodes, mapExtraNodes } from './SuprPanel';
+import { PanelColumn, PanelSection, SuprPanelUnit, mapControlNodes, mapExtraNodes, captionlessFile } from './SuprPanel';
 
 const SUPR_NAM_URI = "https://suprduprnatural.github.io/supr-pedals/nam";
 
@@ -374,11 +374,12 @@ const SuprNamView =
                 const name = SLOT_NAMES[slot];
                 let sections: PanelSection[] = [];
 
-                const info = this.state.slotInfo[slot];
-
                 let rows: PanelSection["rows"] = [];
+                // The column is already headed with the slot's letter and
+                // the browser plainly is the model, so its caption says
+                // nothing the reader does not have.
                 if (modelNode)
-                    rows.push([modelNode]);
+                    rows.push([captionlessFile(modelNode, "model" + name)]);
                 // Drive first: on a plugin running models side by side it is
                 // the control you reach for before any of the others.
                 rows.push([
@@ -390,24 +391,12 @@ const SuprNamView =
                 ]);
                 rows.push([
                     "slim" + name,
-                    "polarity" + name,
+                    // The cap carries the phase symbol and lights when
+                    // engaged, which is the whole control — a caption
+                    // beside it would only say the symbol again.
+                    { supr: "polarity" + name, hideLabel: true, buttonText: "Ø" },
                     { supr: "delay" + name, marks: "home" }
                 ]);
-
-                if (info.loaded && (!info.hasInputLevel || !info.hasLoudness)) {
-                    const missing = !info.hasInputLevel && !info.hasLoudness
-                        ? "no level metadata"
-                        : (!info.hasInputLevel ? "no input level" : "no loudness");
-                    rows.push([(
-                        <Typography key={"uncal" + slot} variant="caption" noWrap
-                            style={{ opacity: 0.55, fontSize: "0.7em", display: "block" }}
-                            title={"This model does not record the level it was trained at, so "
-                                + "the matching Calibration control is inert for it. Set Drive "
-                                + name + " by ear instead."}>
-                            {"⚠ " + missing + " — set Drive by ear"}
-                        </Typography>
-                    )]);
-                }
 
                 rows.push([this.filtersButton(slot)]);
 

@@ -261,9 +261,13 @@ export default class SuprChorusDisplay
             <div style={{
                 width: PLOT_W, height: PLOT_H, position: "relative",
                 borderRadius: 4, overflow: "hidden",
+                // Top-left, matching SuprTunerDisplay. The display was
+                // rotated from the orientation the light theme's original
+                // 1px/5px offset was drawn for, which left its shadow
+                // sitting on the top edge alone.
                 boxShadow: dark
                     ? "5px 5px 6px rgba(0,0,0,0.8) inset"
-                    : "1px 5px 6px #888 inset",
+                    : "5px 5px 6px #888 inset",
                 background: dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.02)"
             }}>
                 <svg viewBox={`0 0 ${PLOT_W} ${PLOT_H}`}

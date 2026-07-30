@@ -200,7 +200,12 @@ const styles = (theme: Theme) => createStyles({
     vuMeterR: css({
         position: "absolute",
         right: 0, top: 0,
-        marginRight: 20, // has to potentially clear a scrollbar.
+        // Mirrors vuMeterL's 6px rather than reserving a scrollbar's
+        // width. This class is only used on the fitContent path, and that
+        // frame sets overflowX and overflowY to hidden — no scrollbar can
+        // appear there for it to clear, so the allowance was simply
+        // showing up as a gap after the output meter on every plugin.
+        paddingRight: 6,
         paddingLeft: 4,
         paddingBottom: 12,
         background: theme.mainBackground,

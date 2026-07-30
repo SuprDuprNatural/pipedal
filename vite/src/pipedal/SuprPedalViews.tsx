@@ -18,6 +18,7 @@ import SuprResponsePlot from './SuprResponsePlot';
 import SuprTunerDisplay from './SuprTunerDisplay';
 import SuprTransientDisplay from './SuprTransientDisplay';
 import SuprChorusDisplay from './SuprChorusDisplay';
+import SuprClackDisplay from './SuprClackDisplay';
 import { PanelColumn, SuprPanelUnit, mapControlNodes } from './SuprPanel';
 import ToobSpectrumResponseView from './ToobSpectrumResponseView';
 
@@ -32,6 +33,7 @@ const SUPR_CHORUS_URI = "https://suprduprnatural.github.io/supr-pedals/chorus";
 const SUPR_SANS_URI = "https://suprduprnatural.github.io/supr-pedals/sans";
 const SUPR_FUZZ_URI = "https://suprduprnatural.github.io/supr-pedals/fuzz";
 const SUPR_BAND_URI = "https://suprduprnatural.github.io/supr-pedals/multiband";
+const SUPR_CLACK_URI = "https://suprduprnatural.github.io/supr-pedals/clack";
 
 const styles = (theme: Theme) => createStyles({});
 
@@ -658,6 +660,67 @@ const SuprTransientView = makePanelView((ctx) => ({
     ]
 }));
 
+// Three sections stacked down one column, in the order you set them up:
+// what the pedal takes out while you play (Noise), what it does in the
+// gaps (Expander), and what comes out (Output). Sections rather than one
+// flat block of eight knobs, because the three groups answer different
+// questions and share nothing but the signal.
+//
+// The meters go in the header, above all of it. With three independent
+// things that can be turning the signal down, "which one is acting" is
+// the only question this face has to answer, and the answer is what tells
+// you which knob to reach for.
+//
+// Clack and Scrape lead: they are the two amounts, and that pair is the
+// pedal. Sense and Focus are shared detector settings for both the click
+// and the squeak duck, so they sit under them rather than in a section of
+// their own. Delta goes with Level because it is a monitor — it changes
+// what you hear, not what the pedal does.
+const SuprClackView = makePanelView((ctx) => ({
+    header: (
+        <SuprClackDisplay key="supr_clack_display"
+            instanceId={ctx.instanceId} />
+    ),
+    columns: [
+        {
+            sections: [
+                {
+                    label: "Noise",
+                    rows: [
+                        [{ supr: "clack", marks: "home" },
+                        { supr: "scrape", marks: "home" },
+                        { supr: "sense", marks: "home" },
+                        { supr: "focus", marks: "home" }]
+                    ]
+                },
+                {
+                    label: "Expander",
+                    rows: [
+                        [{ supr: "thresh", marks: "home" },
+                        { supr: "range", marks: "home" },
+                        { supr: "release", marks: "home" }]
+                    ]
+                },
+                {
+                    label: "Output",
+                    rows: [
+                        [
+                            {
+                                supr: "level", step: 3, showReadout: true,
+                                showPointer: true
+                            },
+                            {
+                                supr: "delta", hideLabel: true,
+                                buttonText: "DELTA"
+                            }
+                        ]
+                    ]
+                },
+            ]
+        }
+    ]
+}));
+
 // The display and controls are one section. Turning the display onto its side
 // gives it the same stature as the three two-knob rows beside it.
 const SuprChorusView = makePanelView((ctx) => [
@@ -783,6 +846,13 @@ export class SuprTransientViewFactory implements IControlViewFactory {
     uri: string = SUPR_TRANSIENT_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
         return (<SuprTransientView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+export class SuprClackViewFactory implements IControlViewFactory {
+    uri: string = SUPR_CLACK_URI;
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprClackView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
     }
 }
 
