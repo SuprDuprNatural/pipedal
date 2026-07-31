@@ -530,26 +530,35 @@ const SuprFuzzView = makePanelView(() => [
 // adding, 3 dB a dot. Every strip gains the same width, so the three
 // bands stay in line with each other, which is the whole reason this face
 // keeps its columns. Level needs no meter: it is not program dependent.
+//
+// The dots are BALANCED by an empty spacer of the same width on the left.
+// Without it the row centres knob-plus-dots as one object, which slides
+// the knob half the meter's width to the left and breaks its alignment
+// with the uncluttered Level knob below it — the columns would still line
+// up with each other, and every knob would still be off its own axis.
+const DOT_METER_W = 11; // SuprDotMeter: 7px dot + 3 left + 1 right
+const dotSpacer = (key: string) => (
+    <div key={key} style={{ width: DOT_METER_W, flex: "0 0 auto" }} />
+);
+
+const meteredKnob = (symbol: string, port: string, instanceId: number,
+    direction: "up" | "down", tone: "cut" | "boost") => ({
+        panelGroup: "row" as const, align: "center" as const, items: [
+            dotSpacer(port + "_pad"),
+            { supr: symbol, marks: "home" as const },
+            (<SuprDotMeter key={port} instanceId={instanceId}
+                port={port} direction={direction} tone={tone} />)
+        ]
+    });
+
 const bandStrip = (name: string, comp: string, drive: string,
     level: string, grPort: string, drvPort: string,
     ctx: { instanceId: number }): PanelColumn => ({
         sections: [{
             label: name,
             rows: [
-                [{
-                    panelGroup: "row", align: "center", items: [
-                        { supr: comp, marks: "home" },
-                        (<SuprDotMeter key={grPort} instanceId={ctx.instanceId}
-                            port={grPort} direction="down" tone="cut" />)
-                    ]
-                }],
-                [{
-                    panelGroup: "row", align: "center", items: [
-                        { supr: drive, marks: "home" },
-                        (<SuprDotMeter key={drvPort} instanceId={ctx.instanceId}
-                            port={drvPort} direction="up" tone="boost" />)
-                    ]
-                }],
+                [meteredKnob(comp, grPort, ctx.instanceId, "down", "cut")],
+                [meteredKnob(drive, drvPort, ctx.instanceId, "up", "boost")],
                 [{ supr: level, step: 3, showReadout: true, showPointer: true }]
             ]
         }]
@@ -710,21 +719,30 @@ const SuprClackView = makePanelView((ctx) => ({
                 {
                     label: "Expander",
                     rows: [
-                        [{ supr: "thresh", marks: "home" },
-                        { supr: "range", marks: "home" },
-                        { supr: "release", marks: "home" }]
+                        [
+                            { supr: "thresh", marks: "home" },
+                            { supr: "range", marks: "home" },
+                            { supr: "release", marks: "home" },
+                            // Delta's own compartment, walled off with the
+                            // panel's own rule. It cannot be a COLUMN — a
+                            // column runs the full height of the unit, which
+                            // would put it beside the Noise row as well, and
+                            // Delta has nothing to do with those four knobs.
+                            // Inside this row it lands exactly under Noise's
+                            // fourth knob, so the face reads as a clean 4x2.
+                            (<div key="delta_wall" style={{
+                                alignSelf: "stretch", width: 4,
+                                background: "#888", marginLeft: 6,
+                                marginRight: 6
+                            }} />),
+                            {
+                                supr: "delta", hideLabel: true,
+                                buttonText: "DELTA"
+                            }
+                        ]
                     ]
                 },
             ]
-        },
-        {
-            sections: [{
-                noLabelSlot: true,
-                centerRows: true,
-                rows: [[{
-                    supr: "delta", hideLabel: true, buttonText: "DELTA"
-                }]]
-            }]
         }
     ]
 }));
