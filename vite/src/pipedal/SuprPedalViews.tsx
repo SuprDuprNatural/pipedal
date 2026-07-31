@@ -19,6 +19,7 @@ import SuprTunerDisplay from './SuprTunerDisplay';
 import SuprTransientDisplay from './SuprTransientDisplay';
 import SuprChorusDisplay from './SuprChorusDisplay';
 import SuprClackDisplay from './SuprClackDisplay';
+import SuprDotMeter from './SuprDotMeter';
 import { PanelColumn, SuprPanelUnit, mapControlNodes } from './SuprPanel';
 import ToobSpectrumResponseView from './ToobSpectrumResponseView';
 
@@ -524,7 +525,37 @@ const SuprFuzzView = makePanelView(() => [
 // so the strips keep their columns even though everything else here got
 // wider. Signal order across: the splits that make the bands, the bands, and
 // the blend and level that end them.
-const SuprBandView = makePanelView(() => [
+// Each band's Comp and Drive knob gets a three-dot meter tucked in on its
+// right — blue down for reduction, orange up for the level the drive is
+// adding, 3 dB a dot. Every strip gains the same width, so the three
+// bands stay in line with each other, which is the whole reason this face
+// keeps its columns. Level needs no meter: it is not program dependent.
+const bandStrip = (name: string, comp: string, drive: string,
+    level: string, grPort: string, drvPort: string,
+    ctx: { instanceId: number }): PanelColumn => ({
+        sections: [{
+            label: name,
+            rows: [
+                [{
+                    panelGroup: "row", align: "center", items: [
+                        { supr: comp, marks: "home" },
+                        (<SuprDotMeter key={grPort} instanceId={ctx.instanceId}
+                            port={grPort} direction="down" tone="cut" />)
+                    ]
+                }],
+                [{
+                    panelGroup: "row", align: "center", items: [
+                        { supr: drive, marks: "home" },
+                        (<SuprDotMeter key={drvPort} instanceId={ctx.instanceId}
+                            port={drvPort} direction="up" tone="boost" />)
+                    ]
+                }],
+                [{ supr: level, step: 3, showReadout: true, showPointer: true }]
+            ]
+        }]
+    });
+
+const SuprBandView = makePanelView((ctx) => [
     {
         sections: [{
             noLabelSlot: true,
@@ -532,36 +563,9 @@ const SuprBandView = makePanelView(() => [
             rows: [[{ supr: "split1", marks: "home" }], [{ supr: "split2", marks: "home" }]]
         }]
     },
-    {
-        sections: [{
-            label: "Low",
-            rows: [
-                [{ supr: "lowComp", marks: "home" }],
-                [{ supr: "lowDrive", marks: "home" }],
-                [{ supr: "lowLevel", step: 3, showReadout: true, showPointer: true }]
-            ]
-        }]
-    },
-    {
-        sections: [{
-            label: "Mid",
-            rows: [
-                [{ supr: "midComp", marks: "home" }],
-                [{ supr: "midDrive", marks: "home" }],
-                [{ supr: "midLevel", step: 3, showReadout: true, showPointer: true }]
-            ]
-        }]
-    },
-    {
-        sections: [{
-            label: "High",
-            rows: [
-                [{ supr: "highComp", marks: "home" }],
-                [{ supr: "highDrive", marks: "home" }],
-                [{ supr: "highLevel", step: 3, showReadout: true, showPointer: true }]
-            ]
-        }]
-    },
+    bandStrip("Low", "lowComp", "lowDrive", "lowLevel", "grLow", "drvLow", ctx),
+    bandStrip("Mid", "midComp", "midDrive", "midLevel", "grMid", "drvMid", ctx),
+    bandStrip("High", "highComp", "highDrive", "highLevel", "grHigh", "drvHigh", ctx),
     {
         sections: [{
             noLabelSlot: true,
@@ -674,8 +678,18 @@ const SuprTransientView = makePanelView((ctx) => ({
 // Clack and Scrape lead: they are the two amounts, and that pair is the
 // pedal. Sense and Focus are shared detector settings for both the click
 // and the squeak duck, so they sit under them rather than in a section of
-// their own. Delta goes with Level because it is a monitor — it changes
-// what you hear, not what the pedal does.
+// their own.
+//
+// Delta gets an unlabelled section of its own beside the expander rather
+// than a row underneath it. It belongs to no section — it is a monitor,
+// and it changes what you hear rather than what the pedal does — so
+// filing it under any of the three would be a small lie about what it
+// is. Unlabelled and tucked into the space the expander's three knobs
+// leave, it costs no height at all.
+//
+// There is no output trim. This pedal only ever takes away, and by
+// amounts it decides for itself; a make-up knob would be a second
+// opinion about a level the pedal never set.
 const SuprClackView = makePanelView((ctx) => ({
     header: (
         <SuprClackDisplay key="supr_clack_display"
@@ -701,22 +715,16 @@ const SuprClackView = makePanelView((ctx) => ({
                         { supr: "release", marks: "home" }]
                     ]
                 },
-                {
-                    label: "Output",
-                    rows: [
-                        [
-                            {
-                                supr: "level", step: 3, showReadout: true,
-                                showPointer: true
-                            },
-                            {
-                                supr: "delta", hideLabel: true,
-                                buttonText: "DELTA"
-                            }
-                        ]
-                    ]
-                },
             ]
+        },
+        {
+            sections: [{
+                noLabelSlot: true,
+                centerRows: true,
+                rows: [[{
+                    supr: "delta", hideLabel: true, buttonText: "DELTA"
+                }]]
+            }]
         }
     ]
 }));

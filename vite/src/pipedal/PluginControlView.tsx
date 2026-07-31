@@ -240,7 +240,15 @@ const styles = (theme: Theme) => createStyles({
     normalGrid: css({
         position: "relative",
         paddingLeft: 30,
-        paddingRight: 45,
+        // 30, not 45. This grid and vuMeterR are chosen by the SAME flag
+        // (`landscapeGrid`), so they always pair: landscape gets
+        // landscapeGrid with the 42px-wide vuMeterRLandscape, and
+        // everything else gets this with the 30px-wide vuMeterR. The 45
+        // was sized for the wider meter and left 15px of dead space
+        // between the effect's border and the output meter. 30 gives the
+        // output meter the same clearance the input meter has at 30 on
+        // the left.
+        paddingRight: 30,
         paddingTop: 8,
 
         flex: "1 1 auto",
