@@ -25,10 +25,12 @@ import DialogEx from './DialogEx';
 import { PiPedalModelFactory } from './PiPedalModel';
 import {
     GpioCapabilities,
+    GpioDisplayMode,
     GpioEncoderRole,
     GpioInputConfiguration,
     GpioInputStatus,
     GpioInputType,
+    GpioLedMatrixMode,
     GpioPull,
     GpioSettings
 } from './Gpio';
@@ -59,16 +61,19 @@ function inputTypeName(inputType: GpioInputType): string {
         case GpioInputType.Latching: return "Latching / maintained switch";
         case GpioInputType.Analog: return "Potentiometer via external ADC";
         case GpioInputType.Encoder: return "Adafruit I2C rotary encoder + button";
+        case GpioInputType.Navigation: return "Adafruit ANO navigation wheel + buttons";
     }
 }
 
 function encoderRoleName(role: GpioEncoderRole): string {
     switch (role) {
         case GpioEncoderRole.None: return "Unassigned — free for mappings";
-        case GpioEncoderRole.PresetBrowser: return "Browse presets; press to load";
-        case GpioEncoderRole.ParameterScroll: return "Scroll parameters; press to change OLED view";
+        case GpioEncoderRole.PresetBrowser: return "Legacy preset role (will migrate)";
+        case GpioEncoderRole.ParameterScroll: return "Legacy scroll role (will migrate)";
         case GpioEncoderRole.Parameter1: return "Change the left shown parameter";
-        case GpioEncoderRole.Parameter2: return "Change the right shown parameter";
+        case GpioEncoderRole.Parameter2: return "Change the second shown parameter";
+        case GpioEncoderRole.Parameter3: return "Change the third shown parameter";
+        case GpioEncoderRole.Parameter4: return "Change the right shown parameter";
     }
 }
 
@@ -105,7 +110,8 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
         input.name = `Control ${copy.inputs.length + 1}`;
         input.line = [17, 27, 22, 23, 24, 25, 5, 6, 12, 13, 16, 19, 20, 21]
             .find(line => !copy.inputs.some(existing => existing.inputType !== GpioInputType.Analog &&
-                existing.inputType !== GpioInputType.Encoder && existing.line === line)) ?? 17;
+                existing.inputType !== GpioInputType.Encoder &&
+                existing.inputType !== GpioInputType.Navigation && existing.line === line)) ?? 17;
         if (capabilities?.chips.length) input.chip = capabilities.chips[0].path;
         copy.inputs.push(input);
         setSettings(copy);
@@ -116,7 +122,7 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
         const bus = capabilities?.i2cDevices.find(device => device === "/dev/i2c-1") ?? "/dev/i2c-1";
         copy.enabled = true;
         // A role may only be claimed once, so release any encoder outside this
-        // rig that already holds one before handing the four roles out.
+        // rig that already holds one before handing the four parameter roles out.
         for (const existing of copy.inputs) {
             existing.encoderRole = GpioEncoderRole.None;
         }
@@ -133,12 +139,34 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                 input.i2cAddress = address;
                 copy.inputs.push(input);
             }
-            input.encoderRole = (GpioEncoderRole.PresetBrowser + index) as GpioEncoderRole;
+            input.enabled = true;
+            input.debounceMs = 10;
+            input.encoderPollIntervalMs = 1;
+            input.encoderRole = (GpioEncoderRole.Parameter1 + index) as GpioEncoderRole;
         }
         copy.encoderRolesConfigured = true;
+        copy.encoderRoleVersion = 4;
+        let navigation = copy.inputs.find(value => value.inputType === GpioInputType.Navigation);
+        if (!navigation) {
+            navigation = new GpioInputConfiguration();
+            navigation.id = makeInputId(copy);
+            navigation.name = "Navigation";
+            navigation.inputType = GpioInputType.Navigation;
+            copy.inputs.push(navigation);
+        }
+        navigation.enabled = true;
+        navigation.i2cDevice = bus;
+        navigation.i2cAddress = 0x49;
+        navigation.debounceMs = 10;
+        navigation.encoderPollIntervalMs = 1;
+        navigation.encoderRole = GpioEncoderRole.None;
         copy.display.enabled = true;
         copy.display.i2cDevice = bus;
         copy.display.i2cAddress = 0x3C;
+        copy.ledMatrix.enabled = true;
+        copy.ledMatrix.i2cDevice = bus;
+        copy.ledMatrix.i2cAddress = 0x70;
+        copy.ledMatrix.refreshIntervalMs = 16;
         setSettings(copy);
     };
 
@@ -186,7 +214,7 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                 <Box sx={{ flex: 1 }}>
                                     <Typography variant="subtitle1">Enable hardware inputs</Typography>
                                     <Typography variant="body2" color="text.secondary">
-                                        Encoder roles are global. Which two parameters the knobs edit follows the scroll position, which is saved with each preset.
+                                        The four parameter encoders are global. The navigation wheel selects the preset, effect, and four-parameter window.
                                     </Typography>
                                 </Box>
                                 <Switch checked={settings.enabled}
@@ -223,7 +251,7 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                         <Box sx={{ flex: 1 }}>
                                             <Typography variant="subtitle1">SSD1306 OLED display</Typography>
                                             <Typography variant="body2" color="text.secondary">
-                                                Starts on the two shown parameters. Press the scroll encoder to cycle through parameters, waveform, and the built-in strobe tuner.
+                                                Shows four effect parameters during navigation, then returns to the selected passive screen after the temporary display time.
                                             </Typography>
                                         </Box>
                                         <Switch checked={settings.display.enabled} onChange={event => {
@@ -248,14 +276,93 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                             <TextField size="small" type="number" label="OLED refresh (ms)" value={settings.display.refreshIntervalMs}
                                                 inputProps={{ min: 50, max: 5000, step: 25 }}
                                                 onChange={event => { const copy = settings.clone(); copy.display.refreshIntervalMs = Number(event.target.value); setSettings(copy); }} />
+                                            <TextField select size="small" label="Passive OLED screen" value={settings.display.passiveMode}
+                                                onChange={event => { const copy = settings.clone(); copy.display.passiveMode = Number(event.target.value) as GpioDisplayMode; setSettings(copy); }}>
+                                                <MenuItem value={GpioDisplayMode.Controls}>Four parameters</MenuItem>
+                                                <MenuItem value={GpioDisplayMode.Waveform} disabled={!settings.display.waveformEnabled}>Output/input waveform</MenuItem>
+                                                <MenuItem value={GpioDisplayMode.Tuner}>Built-in tuner</MenuItem>
+                                                <MenuItem value={GpioDisplayMode.Blank}>Blank</MenuItem>
+                                            </TextField>
                                         </Box>
                                         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
                                             <FormControlLabel label="Include waveform view in the OLED cycle" control={<Switch checked={settings.display.waveformEnabled}
-                                                onChange={event => { const copy = settings.clone(); copy.display.waveformEnabled = event.target.checked; setSettings(copy); }} />} />
+                                                onChange={event => {
+                                                    const copy = settings.clone();
+                                                    copy.display.waveformEnabled = event.target.checked;
+                                                    if (!event.target.checked && copy.display.passiveMode === GpioDisplayMode.Waveform) {
+                                                        copy.display.passiveMode = GpioDisplayMode.Controls;
+                                                    }
+                                                    setSettings(copy);
+                                                }} />} />
                                             <FormControlLabel label="Use output waveform (off = input)" control={<Switch checked={settings.display.waveformOutput}
                                                 onChange={event => { const copy = settings.clone(); copy.display.waveformOutput = event.target.checked; setSettings(copy); }} />} />
                                             <FormControlLabel label="Rotate display 180°" control={<Switch checked={settings.display.rotate180}
                                                 onChange={event => { const copy = settings.clone(); copy.display.rotate180 = event.target.checked; setSettings(copy); }} />} />
+                                        </Box>
+                                    </>}
+                                </Stack>
+                            </CardContent>
+                        </Card>
+
+                        <Card variant="outlined">
+                            <CardContent>
+                                <Stack spacing={2}>
+                                    <Box sx={{ display: "flex", alignItems: "center" }}>
+                                        <Box sx={{ flex: 1 }}>
+                                            <Typography variant="subtitle1">HT16K33 rounded 5x5 audio matrix</Typography>
+                                            <Typography variant="body2" color="text.secondary">
+                                                Shows an output spectrum or audio-triggered liquid ripples through the visible 5x5 aperture; its four hidden corners stay off.
+                                            </Typography>
+                                        </Box>
+                                        <Switch checked={settings.ledMatrix.enabled} onChange={event => {
+                                            const copy = settings.clone(); copy.ledMatrix.enabled = event.target.checked; setSettings(copy);
+                                        }} />
+                                    </Box>
+                                    {settings.ledMatrix.enabled && <>
+                                        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(4, 1fr)" }, gap: 2 }}>
+                                            <TextField select size="small" label="I2C bus" value={settings.ledMatrix.i2cDevice}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.i2cDevice = event.target.value; setSettings(copy); }}>
+                                                {(capabilities?.i2cDevices ?? []).map(device => <MenuItem key={device} value={device}>{device}</MenuItem>)}
+                                                {!capabilities?.i2cDevices.includes(settings.ledMatrix.i2cDevice) && <MenuItem value={settings.ledMatrix.i2cDevice}>{settings.ledMatrix.i2cDevice} (not currently available)</MenuItem>}
+                                            </TextField>
+                                            <TextField select size="small" label="Matrix address" value={settings.ledMatrix.i2cAddress}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.i2cAddress = Number(event.target.value); setSettings(copy); }}>
+                                                {[0x70, 0x71, 0x72, 0x73].map(address => <MenuItem key={address} value={address}>0x{address.toString(16).toUpperCase()}</MenuItem>)}
+                                            </TextField>
+                                            <TextField size="small" type="number" label="Brightness (0–15)" value={settings.ledMatrix.brightness}
+                                                inputProps={{ min: 0, max: 15, step: 1 }}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.brightness = Number(event.target.value); setSettings(copy); }} />
+                                            <TextField size="small" type="number" label="Refresh (ms)" value={settings.ledMatrix.refreshIntervalMs}
+                                                inputProps={{ min: 10, max: 1000, step: 1 }}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.refreshIntervalMs = Number(event.target.value); setSettings(copy); }} />
+                                            <TextField select size="small" label="Animation" value={settings.ledMatrix.mode}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.mode = Number(event.target.value) as GpioLedMatrixMode; setSettings(copy); }}>
+                                                <MenuItem value={GpioLedMatrixMode.Spectrum}>Five-band spectrum</MenuItem>
+                                                <MenuItem value={GpioLedMatrixMode.Droplets}>Audio droplets</MenuItem>
+                                            </TextField>
+                                            <TextField size="small" type="number" label="Noise floor (dB)" value={settings.ledMatrix.floorDb}
+                                                inputProps={{ min: -96, max: -6, step: 1 }}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.floorDb = Number(event.target.value); setSettings(copy); }} />
+                                            <TextField size="small" type="number" label="Decay (0–0.99)" value={settings.ledMatrix.decay}
+                                                inputProps={{ min: 0, max: 0.99, step: 0.05 }}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.decay = Number(event.target.value); setSettings(copy); }} />
+                                            <TextField size="small" type="number" label="Visible X origin" value={settings.ledMatrix.originX}
+                                                inputProps={{ min: 0, max: 3, step: 1 }}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.originX = Number(event.target.value); setSettings(copy); }} />
+                                            <TextField size="small" type="number" label="Visible Y origin" value={settings.ledMatrix.originY}
+                                                inputProps={{ min: 0, max: 3, step: 1 }}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.originY = Number(event.target.value); setSettings(copy); }} />
+                                            <TextField select size="small" label="Rotation" value={settings.ledMatrix.rotation}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.rotation = Number(event.target.value); setSettings(copy); }}>
+                                                <MenuItem value={0}>0°</MenuItem><MenuItem value={1}>90° clockwise</MenuItem>
+                                                <MenuItem value={2}>180°</MenuItem><MenuItem value={3}>270° clockwise</MenuItem>
+                                            </TextField>
+                                        </Box>
+                                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                                            <FormControlLabel label="Mirror horizontally" control={<Switch checked={settings.ledMatrix.mirror}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.mirror = event.target.checked; setSettings(copy); }} />} />
+                                            <FormControlLabel label="Show asymmetric calibration arrow" control={<Switch checked={settings.ledMatrix.calibrationMode}
+                                                onChange={event => { const copy = settings.clone(); copy.ledMatrix.calibrationMode = event.target.checked; setSettings(copy); }} />} />
                                         </Box>
                                     </>}
                                 </Stack>
@@ -289,15 +396,18 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                                     if (value.inputType !== GpioInputType.Encoder) {
                                                         value.encoderRole = GpioEncoderRole.None;
                                                     }
+                                                    if (value.inputType === GpioInputType.Navigation) {
+                                                        value.i2cAddress = 0x49;
+                                                    }
                                                     if (value.inputType === GpioInputType.Analog && !value.analogPath && capabilities?.analogChannels.length) {
                                                         value.analogPath = capabilities.analogChannels[0].path;
                                                     }
                                                 })}>
-                                                {[GpioInputType.Momentary, GpioInputType.Latching, GpioInputType.Encoder, GpioInputType.Analog].map(type =>
+                                                {[GpioInputType.Momentary, GpioInputType.Latching, GpioInputType.Encoder, GpioInputType.Navigation, GpioInputType.Analog].map(type =>
                                                     <MenuItem key={type} value={type}>{inputTypeName(type)}</MenuItem>)}
                                             </TextField>
 
-                                            {input.inputType === GpioInputType.Encoder ? (
+                                            {input.inputType === GpioInputType.Encoder || input.inputType === GpioInputType.Navigation ? (
                                                 <>
                                                     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
                                                         <TextField select label="I2C bus" size="small" value={input.i2cDevice}
@@ -305,19 +415,21 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                                             {(capabilities?.i2cDevices ?? []).map(device => <MenuItem key={device} value={device}>{device}</MenuItem>)}
                                                             {!capabilities?.i2cDevices.includes(input.i2cDevice) && <MenuItem value={input.i2cDevice}>{input.i2cDevice} (not currently available)</MenuItem>}
                                                         </TextField>
-                                                        <TextField select label="Encoder address" size="small" value={input.i2cAddress}
+                                                        <TextField select label="I2C address" size="small" value={input.i2cAddress}
                                                             onChange={event => updateInput(index, value => value.i2cAddress = Number(event.target.value))}>
-                                                            {[0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D].map(address =>
+                                                            {(input.inputType === GpioInputType.Navigation
+                                                                ? [0x49,0x4A,0x4B,0x4C,0x4D,0x4E,0x4F,0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,0x58]
+                                                                : [0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D]).map(address =>
                                                                 <MenuItem key={address} value={address}>0x{address.toString(16).toUpperCase()}</MenuItem>)}
                                                         </TextField>
                                                         <TextField label="Button debounce (ms)" type="number" size="small" value={input.debounceMs}
                                                             inputProps={{ min: 0, max: 2000 }}
                                                             onChange={event => updateInput(index, value => value.debounceMs = Number(event.target.value))} />
                                                         <TextField label="Poll interval (ms)" type="number" size="small" value={input.encoderPollIntervalMs}
-                                                            inputProps={{ min: 5, max: 1000 }}
+                                                            inputProps={{ min: 1, max: 1000 }}
                                                             onChange={event => updateInput(index, value => value.encoderPollIntervalMs = Number(event.target.value))} />
                                                     </Box>
-                                                    <TextField select label="Controller role" size="small" value={input.encoderRole}
+                                                    {input.inputType === GpioInputType.Encoder && <TextField select label="Controller role" size="small" value={input.encoderRole}
                                                         helperText="A standard role reserves this encoder's turn action. Parameter encoder push buttons remain available to advanced mappings."
                                                         onChange={event => {
                                                             const copy = settings.clone();
@@ -329,12 +441,13 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                                             }
                                                             copy.inputs[index].encoderRole = role;
                                                             copy.encoderRolesConfigured = true;
+                                                            copy.encoderRoleVersion = 4;
                                                             setSettings(copy);
                                                         }}>
-                                                        {[GpioEncoderRole.None, GpioEncoderRole.PresetBrowser, GpioEncoderRole.ParameterScroll,
-                                                            GpioEncoderRole.Parameter1, GpioEncoderRole.Parameter2].map(role =>
+                                                        {[GpioEncoderRole.None, GpioEncoderRole.Parameter1, GpioEncoderRole.Parameter2,
+                                                            GpioEncoderRole.Parameter3, GpioEncoderRole.Parameter4].map(role =>
                                                             <MenuItem key={role} value={role}>{encoderRoleName(role)}</MenuItem>)}
-                                                    </TextField>
+                                                    </TextField>}
                                                     <FormControlLabel label="Reverse rotation (recommended for clockwise = increase)"
                                                         control={<Switch checked={input.encoderReversed}
                                                             onChange={event => updateInput(index, value => value.encoderReversed = event.target.checked)} />} />
@@ -418,7 +531,7 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                                     <Divider />
                                                     <Typography variant="caption" color={status.error ? "error" : "text.secondary"}>
                                                         {status.error || (status.connected
-                                                            ? `Live value: ${input.inputType === GpioInputType.Analog ? `${Math.round(status.value * 100)}%` : input.inputType === GpioInputType.Encoder ? (status.buttonPressed ? "button pressed" : "ready — turns are relative ±1 events") : (status.value >= 0.5 ? "On / pressed" : "Off / released")}`
+                                                            ? `Live value: ${input.inputType === GpioInputType.Analog ? `${Math.round(status.value * 100)}%` : input.inputType === GpioInputType.Encoder || input.inputType === GpioInputType.Navigation ? (status.buttonPressed ? "button pressed" : "ready — turns are relative ±1 events") : (status.value >= 0.5 ? "On / pressed" : "Off / released")}`
                                                             : "Waiting for input…")}
                                                     </Typography>
                                                 </>
@@ -430,7 +543,7 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                         })}
 
                         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                            <Button startIcon={<AddIcon />} variant="contained" onClick={addEncoderRig}>Set up four encoders + OLED</Button>
+                            <Button startIcon={<AddIcon />} variant="contained" onClick={addEncoderRig}>Set up four encoders + navigation + displays</Button>
                             <Button startIcon={<AddIcon />} variant="outlined" onClick={addInput}>Add hardware input</Button>
                         </Box>
                         <Box sx={{ height: 16 }} />

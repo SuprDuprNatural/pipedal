@@ -755,13 +755,14 @@ void PiPedalModel::SetControl(int64_t clientId, int64_t pedalItemId, const std::
     this->SetPresetChanged(clientId, true);
 
     // A change from anywhere -- hardware, web interface, or a MIDI binding --
-    // refreshes the OLED when it is one of the two parameters on screen.
+    // refreshes the OLED when it is one of the four parameters on screen.
     bool updateDashboard = false;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
         const GpioParameter changed{pedalItemId, symbol};
-        updateDashboard = gpioShownParameters[0] == changed ||
-                          gpioShownParameters[1] == changed;
+        updateDashboard = std::find(
+            gpioShownParameters.begin(), gpioShownParameters.end(), changed) !=
+            gpioShownParameters.end();
     }
     if (updateDashboard)
         UpdateGpioDashboard();
@@ -1514,6 +1515,7 @@ void PiPedalModel::LoadPreset(int64_t clientId, int64_t instanceId)
         // The scroll position travels with the preset; only the browse
         // candidate is per-session state.
         gpioPendingPresetId = -1;
+        gpioSelectedEffectId = -1;
 
         this->hasPresetChanged = false; // no fire.
         this->FirePedalboardChanged(clientId);
@@ -3274,32 +3276,78 @@ static float GpioValueToRange(const Lv2PortInfo &port, float value)
     return (value - minimum) / (maximum - minimum);
 }
 
-std::vector<GpioParameter> PiPedalModel::GetGpioParameters()
+std::vector<std::pair<int64_t, std::string>> PiPedalModel::GetGpioEffects()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-
-    std::vector<GpioParameter> result;
+    std::vector<std::pair<int64_t, std::string>> result;
     for (auto *item : pedalboard.GetAllPlugins())
     {
         if (item->isEmpty() || item->isSplit())
             continue;
-        auto plugin = GetPluginInfo(item->uri_);
-        if (!plugin)
-            continue;
-        for (const auto &port : plugin->ports())
-        {
-            if (port && IsGpioVisibleParameter(*port))
-                result.push_back(GpioParameter{item->instanceId_, port->symbol()});
-        }
+        result.emplace_back(
+            item->instanceId_,
+            item->title_.empty() ? item->pluginName_ : item->title_);
     }
     return result;
 }
 
-// The window always shows two adjacent parameters, so the last scroll position
-// is the one whose second parameter is the last in the list.
+void PiPedalModel::EnsureGpioSelectedEffect()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    const auto effects = GetGpioEffects();
+    if (effects.empty())
+    {
+        gpioSelectedEffectId = -1;
+        return;
+    }
+    if (std::none_of(
+            effects.begin(), effects.end(),
+            [this](const auto &effect) { return effect.first == gpioSelectedEffectId; }))
+    {
+        const int64_t anchor = pedalboard.gpioScrollInstanceId();
+        const auto anchored = std::find_if(
+            effects.begin(), effects.end(),
+            [anchor](const auto &effect) { return effect.first == anchor; });
+        gpioSelectedEffectId = anchored != effects.end() ? anchored->first : effects.front().first;
+    }
+}
+
+std::vector<GpioParameter> PiPedalModel::GetGpioParameters(int64_t effectId)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    std::vector<GpioParameter> result;
+    for (auto *item : pedalboard.GetAllPlugins())
+    {
+        if ((effectId != -1 && item->instanceId_ != effectId) ||
+            item->isEmpty() || item->isSplit())
+            continue;
+        auto plugin = GetPluginInfo(item->uri_);
+        if (!plugin)
+        {
+            if (effectId != -1)
+                break;
+            continue;
+        }
+        for (const auto &port : plugin->ports())
+        {
+            // Match the web UI's actual control set: hidden/output/bypass
+            // ports are rejected by IsGpioVisibleParameter, and a visible
+            // control must also have a live value on this pedalboard item.
+            if (port && IsGpioVisibleParameter(*port) &&
+                item->GetControlValue(port->symbol()) != nullptr)
+                result.push_back(GpioParameter{item->instanceId_, port->symbol()});
+        }
+        if (effectId != -1)
+            break;
+    }
+    return result;
+}
+
+// The window always shows four adjacent parameters, so the last scroll
+// position is the one whose fourth parameter is the last in the list.
 static size_t GpioScrollPositions(size_t parameterCount)
 {
-    return parameterCount <= 2 ? 1 : parameterCount - 1;
+    return parameterCount <= 4 ? 1 : parameterCount - 3;
 }
 
 size_t PiPedalModel::GetGpioScrollIndex(const std::vector<GpioParameter> &parameters)
@@ -3331,11 +3379,10 @@ void PiPedalModel::SetGpioScrollIndex(
     pedalboard.gpioScrollSymbol(parameters[index].symbol);
 }
 
-// An encoder holding a standard role handles its own turns, and the preset and
-// parameter-scroll encoders also use their own push buttons. Mappings on those
-// events can never fire, so drop them rather than listing mappings in the web
-// interface that quietly do nothing. Presets written by the earlier workflow
-// are full of them.
+// A parameter encoder handles its own turns but leaves its push button free.
+// The ANO device is entirely reserved for navigation. Legacy preset/scroll
+// role events can never fire after migration, so remove mappings that would be
+// listed in the web interface but quietly do nothing.
 void PiPedalModel::RemoveUnreachableGpioBindings()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -3352,6 +3399,13 @@ void PiPedalModel::RemoveUnreachableGpioBindings()
     const auto &bindings = pedalboard.gpioBindings();
     auto isUnreachable = [&](const GpioBinding &binding)
     {
+        const auto input = std::find_if(
+            gpioSettings.inputs_.begin(), gpioSettings.inputs_.end(),
+            [&binding](const GpioInputConfiguration &candidate)
+            { return candidate.id_ == binding.inputId_; });
+        if (input != gpioSettings.inputs_.end() &&
+            input->inputType() == GpioInputType::Navigation)
+            return true;
         const GpioEncoderRole role = roleForInput(binding.inputId_);
         if (role == GpioEncoderRole::None)
             return false;
@@ -3465,6 +3519,294 @@ void PiPedalModel::AdjustGpioParameter(const GpioParameter &parameter, int32_t d
     SetControl(-1, parameter.instanceId, parameter.symbol, targetValue);
 }
 
+void PiPedalModel::ShowGpioNavigationLayer()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (!gpioManager)
+        return;
+    if (gpioNavigationLayer == GpioNavigationLayer::Parameters)
+    {
+        UpdateGpioDashboard(0, true);
+        return;
+    }
+
+    GpioDisplayMenu menu;
+    if (gpioNavigationLayer == GpioNavigationLayer::Settings)
+    {
+        static constexpr std::array<const char *, 4> passiveNames{
+            "PARAMETERS", "WAVEFORM", "TUNER", "BLANK"};
+        static constexpr std::array<const char *, 2> ledModeNames{
+            "SPECTRUM", "DROPLETS"};
+        const int32_t passive = std::clamp<int32_t>(
+            gpioSettings.display_.passiveMode_, 0, 3);
+        menu.title = "SETTINGS";
+        menu.items = {
+            "PASSIVE: " + std::string(passiveNames[static_cast<size_t>(passive)]),
+            "LED MODE: " + std::string(ledModeNames[static_cast<size_t>(
+                std::clamp<int32_t>(gpioSettings.ledMatrix_.mode_, 0, 1))]),
+            "LED BRIGHT: " + std::to_string(gpioSettings.ledMatrix_.brightness_),
+            "LED FLOOR: " + std::to_string(
+                static_cast<int32_t>(std::lround(gpioSettings.ledMatrix_.floorDb_))) + "DB",
+            "LED CAL: " + std::string(
+                gpioSettings.ledMatrix_.calibrationMode_ ? "ON" : "OFF")};
+        menu.selectedIndex = gpioSettingsMenuIndex;
+    }
+    else if (gpioNavigationLayer == GpioNavigationLayer::Presets)
+    {
+        PresetIndex index;
+        storage.GetPresetIndex(&index);
+        menu.title = "PRESETS";
+        const int64_t selectedId = gpioPendingPresetId != -1
+                                       ? gpioPendingPresetId
+                                       : index.selectedInstanceId();
+        for (size_t i = 0; i < index.presets().size(); ++i)
+        {
+            menu.items.push_back(index.presets()[i].name());
+            if (index.presets()[i].instanceId() == selectedId)
+                menu.selectedIndex = static_cast<int32_t>(i);
+        }
+    }
+    else
+    {
+        EnsureGpioSelectedEffect();
+        const auto effects = GetGpioEffects();
+        menu.title = "EFFECTS";
+        for (size_t i = 0; i < effects.size(); ++i)
+        {
+            menu.items.push_back(effects[i].second);
+            if (effects[i].first == gpioSelectedEffectId)
+                menu.selectedIndex = static_cast<int32_t>(i);
+        }
+    }
+    gpioManager->ShowTemporaryMenu(menu);
+}
+
+void PiPedalModel::MoveGpioNavigationSelection(int32_t delta)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (delta == 0)
+        return;
+    const int32_t direction = delta > 0 ? 1 : -1;
+    if (gpioNavigationLayer == GpioNavigationLayer::Settings)
+    {
+        constexpr int32_t count = 5;
+        gpioSettingsMenuIndex = (gpioSettingsMenuIndex + direction + count) % count;
+    }
+    else if (gpioNavigationLayer == GpioNavigationLayer::Presets)
+    {
+        PresetIndex index;
+        storage.GetPresetIndex(&index);
+        if (!index.presets().empty())
+        {
+            const int64_t selectedId = gpioPendingPresetId != -1
+                                           ? gpioPendingPresetId
+                                           : index.selectedInstanceId();
+            auto selected = std::find_if(
+                index.presets().begin(), index.presets().end(),
+                [selectedId](const PresetIndexEntry &entry)
+                { return entry.instanceId() == selectedId; });
+            int64_t position = selected == index.presets().end()
+                                   ? 0
+                                   : std::distance(index.presets().begin(), selected);
+            position = (position + direction +
+                        static_cast<int64_t>(index.presets().size())) %
+                       static_cast<int64_t>(index.presets().size());
+            gpioPendingPresetId = index.presets()[static_cast<size_t>(position)].instanceId();
+        }
+    }
+    else if (gpioNavigationLayer == GpioNavigationLayer::Effects)
+    {
+        const auto effects = GetGpioEffects();
+        if (!effects.empty())
+        {
+            EnsureGpioSelectedEffect();
+            auto selected = std::find_if(
+                effects.begin(), effects.end(),
+                [this](const auto &effect) { return effect.first == gpioSelectedEffectId; });
+            int64_t position = selected == effects.end()
+                                   ? 0
+                                   : std::distance(effects.begin(), selected);
+            position = (position + direction + static_cast<int64_t>(effects.size())) %
+                       static_cast<int64_t>(effects.size());
+            gpioSelectedEffectId = effects[static_cast<size_t>(position)].first;
+        }
+    }
+    else
+    {
+        auto parameters = GetGpioParameters();
+        if (!parameters.empty())
+        {
+            const int64_t positions = static_cast<int64_t>(GpioScrollPositions(parameters.size()));
+            int64_t index =
+                (static_cast<int64_t>(GetGpioScrollIndex(parameters)) + direction) % positions;
+            if (index < 0)
+                index += positions;
+            SetGpioScrollIndex(parameters, static_cast<size_t>(index));
+        }
+    }
+    ShowGpioNavigationLayer();
+}
+
+void PiPedalModel::AcceptGpioNavigationSelection()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (gpioNavigationLayer == GpioNavigationLayer::Settings)
+    {
+        bool reconfigure = false;
+        if (gpioSettingsMenuIndex == 0)
+        {
+            int32_t next = (gpioSettings.display_.passiveMode_ + 1) % 4;
+            if (next == static_cast<int32_t>(GpioDisplayMode::Waveform) &&
+                !gpioSettings.display_.waveformEnabled_)
+                next = static_cast<int32_t>(GpioDisplayMode::Tuner);
+            gpioSettings.display_.passiveMode_ = next;
+            if (gpioManager)
+                gpioManager->SetDisplayMode(static_cast<GpioDisplayMode>(next));
+        }
+        else if (gpioSettingsMenuIndex == 1)
+        {
+            gpioSettings.ledMatrix_.mode_ =
+                (gpioSettings.ledMatrix_.mode_ + 1) % 2;
+            reconfigure = true;
+        }
+        else if (gpioSettingsMenuIndex == 2)
+        {
+            gpioSettings.ledMatrix_.brightness_ =
+                (gpioSettings.ledMatrix_.brightness_ + 1) % 16;
+            reconfigure = true;
+        }
+        else if (gpioSettingsMenuIndex == 3)
+        {
+            gpioSettings.ledMatrix_.floorDb_ += 6.0f;
+            if (gpioSettings.ledMatrix_.floorDb_ > -18.0f)
+                gpioSettings.ledMatrix_.floorDb_ = -60.0f;
+            reconfigure = true;
+        }
+        else if (gpioSettingsMenuIndex == 4)
+        {
+            gpioSettings.ledMatrix_.calibrationMode_ =
+                !gpioSettings.ledMatrix_.calibrationMode_;
+            reconfigure = true;
+        }
+        storage.SetGpioSettings(gpioSettings);
+        if (reconfigure && gpioManager)
+        {
+            gpioManager->Configure(gpioSettings);
+            UpdateGpioDashboard();
+        }
+        FireGpioSettingsChanged();
+        ShowGpioNavigationLayer();
+        return;
+    }
+
+    if (gpioNavigationLayer == GpioNavigationLayer::Presets)
+    {
+        PresetIndex index;
+        storage.GetPresetIndex(&index);
+        const int64_t targetId = gpioPendingPresetId != -1
+                                     ? gpioPendingPresetId
+                                     : index.selectedInstanceId();
+        if (targetId != -1)
+            LoadPreset(-1, targetId);
+        gpioPendingPresetId = -1;
+        gpioSelectedEffectId = -1;
+        ShowGpioNavigationLayer();
+        return;
+    }
+
+    if (gpioNavigationLayer == GpioNavigationLayer::Effects)
+    {
+        AdvanceGpioNavigationLayer();
+        return;
+    }
+
+    ShowGpioNavigationLayer();
+}
+
+void PiPedalModel::AdvanceGpioNavigationLayer()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (gpioNavigationLayer == GpioNavigationLayer::Settings)
+    {
+        // Right moves inward but never applies the highlighted setting.
+        gpioPendingPresetId = -1;
+        gpioNavigationLayer = GpioNavigationLayer::Presets;
+    }
+    else if (gpioNavigationLayer == GpioNavigationLayer::Presets)
+    {
+        // Enter the effects belonging to the already loaded preset. The
+        // highlighted preset remains only a browsing cursor until Select.
+        gpioPendingPresetId = -1;
+        gpioSelectedEffectId = -1;
+        EnsureGpioSelectedEffect();
+        gpioNavigationLayer = GpioNavigationLayer::Effects;
+    }
+    else if (gpioNavigationLayer == GpioNavigationLayer::Effects)
+    {
+        EnsureGpioSelectedEffect();
+        const auto effectParameters = GetGpioParameters(gpioSelectedEffectId);
+        const auto allParameters = GetGpioParameters();
+        if (!effectParameters.empty())
+        {
+            auto first = std::find(
+                allParameters.begin(), allParameters.end(), effectParameters.front());
+            if (first != allParameters.end())
+                SetGpioScrollIndex(
+                    allParameters,
+                    static_cast<size_t>(std::distance(allParameters.begin(), first)));
+        }
+        gpioNavigationLayer = GpioNavigationLayer::Parameters;
+    }
+    ShowGpioNavigationLayer();
+}
+
+void PiPedalModel::BackGpioNavigationLayer()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (gpioNavigationLayer != GpioNavigationLayer::Settings)
+    {
+        gpioNavigationLayer = static_cast<GpioNavigationLayer>(
+            static_cast<int32_t>(gpioNavigationLayer) - 1);
+        if (gpioNavigationLayer == GpioNavigationLayer::Effects)
+            EnsureGpioSelectedEffect();
+    }
+    ShowGpioNavigationLayer();
+}
+
+void PiPedalModel::HandleGpioNavigationEvent(const GpioInputEvent &event)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (event.initial)
+        return;
+    if (event.eventType == GpioInputEventType::EncoderTurn)
+    {
+        MoveGpioNavigationSelection(event.delta);
+        return;
+    }
+    if (!event.risingEdge)
+        return;
+    switch (event.navigationButton)
+    {
+    case GpioNavigationButton::Up:
+        MoveGpioNavigationSelection(-1);
+        break;
+    case GpioNavigationButton::Down:
+        MoveGpioNavigationSelection(1);
+        break;
+    case GpioNavigationButton::Left:
+        BackGpioNavigationLayer();
+        break;
+    case GpioNavigationButton::Right:
+        AdvanceGpioNavigationLayer();
+        break;
+    case GpioNavigationButton::Select:
+        AcceptGpioNavigationSelection();
+        break;
+    default:
+        break;
+    }
+}
+
 bool PiPedalModel::HandleGpioRoleEvent(
     const GpioInputEvent &event,
     GpioEncoderRole role)
@@ -3477,124 +3819,26 @@ bool PiPedalModel::HandleGpioRoleEvent(
     if (event.initial)
         return true;
 
-    if (role == GpioEncoderRole::PresetBrowser)
-    {
-        if (event.eventType == GpioInputEventType::EncoderTurn && event.delta != 0)
-        {
-            PresetIndex index;
-            std::string name;
-            std::string currentName;
-            size_t selected = 0;
-            {
-                std::lock_guard<std::recursive_mutex> lock(mutex);
-                storage.GetPresetIndex(&index);
-                if (index.presets().empty())
-                {
-                    ShowGpioWorkflowMessage("PRESET", "NO PRESETS", "");
-                    return true;
-                }
-                index.GetPresetName(index.selectedInstanceId(), &currentName);
-
-                int64_t baseId = gpioPendingPresetId != -1
-                                     ? gpioPendingPresetId
-                                     : index.selectedInstanceId();
-                auto found = std::find_if(
-                    index.presets().begin(), index.presets().end(),
-                    [baseId](const PresetIndexEntry &entry)
-                    {
-                        return entry.instanceId() == baseId;
-                    });
-                if (found != index.presets().end())
-                    selected = static_cast<size_t>(std::distance(index.presets().begin(), found));
-                else
-                    selected = event.delta > 0 ? index.presets().size() - 1 : 0;
-
-                if (event.delta > 0)
-                    selected = (selected + 1) % index.presets().size();
-                else
-                    selected = selected == 0 ? index.presets().size() - 1 : selected - 1;
-                gpioPendingPresetId = index.presets()[selected].instanceId();
-                name = index.presets()[selected].name();
-            }
-            ShowGpioWorkflowMessage(
-                "CURRENT: " + currentName,
-                "SELECT PRESET",
-                name);
-            return true;
-        }
-        if (event.eventType == GpioInputEventType::EncoderButton && event.risingEdge)
-        {
-            int64_t targetId = -1;
-            std::string name;
-            {
-                std::lock_guard<std::recursive_mutex> lock(mutex);
-                PresetIndex index;
-                storage.GetPresetIndex(&index);
-                targetId = gpioPendingPresetId != -1
-                               ? gpioPendingPresetId
-                               : index.selectedInstanceId();
-                index.GetPresetName(targetId, &name);
-                gpioPendingPresetId = -1;
-            }
-            if (targetId != -1)
-            {
-                LoadPreset(-1, targetId);
-                ShowGpioWorkflowMessage("PRESET LOADED", name, "ACTIVE");
-            }
-            return true;
-        }
+    // These roles exist only so settings written by the old workflow remain
+    // parseable until EnsureStandardEncoderRoles migrates them.
+    if (role == GpioEncoderRole::PresetBrowser ||
+        role == GpioEncoderRole::ParameterScroll)
         return true;
-    }
 
-    if (role == GpioEncoderRole::ParameterScroll)
-    {
-        if (event.eventType == GpioInputEventType::EncoderButton && event.risingEdge)
-        {
-            std::lock_guard<std::recursive_mutex> lock(mutex);
-            if (gpioManager)
-            {
-                gpioManager->ClearDisplayMessage();
-                gpioManager->CycleDisplayMode();
-            }
-            return true;
-        }
-
-        if (event.eventType == GpioInputEventType::EncoderTurn && event.delta != 0)
-        {
-            auto parameters = GetGpioParameters();
-            if (parameters.empty())
-            {
-                ShowGpioWorkflowMessage("PARAMETERS", "NONE IN THIS PRESET", "");
-                return true;
-            }
-            const int64_t positions =
-                static_cast<int64_t>(GpioScrollPositions(parameters.size()));
-            int64_t index =
-                (static_cast<int64_t>(GetGpioScrollIndex(parameters)) + event.delta) %
-                positions;
-            if (index < 0)
-                index += positions;
-            SetGpioScrollIndex(parameters, static_cast<size_t>(index));
-            if (gpioManager)
-                gpioManager->ClearDisplayMessage();
-            UpdateGpioDashboard(0, true);
-        }
-        return true;
-    }
-
-    if ((role == GpioEncoderRole::Parameter1 || role == GpioEncoderRole::Parameter2) &&
+    if (role >= GpioEncoderRole::Parameter1 && role <= GpioEncoderRole::Parameter4 &&
         event.eventType == GpioInputEventType::EncoderTurn)
     {
         if (event.delta == 0)
             return true;
-        const int32_t slot = role == GpioEncoderRole::Parameter1 ? 1 : 2;
+        const int32_t slot = static_cast<int32_t>(role) -
+                             static_cast<int32_t>(GpioEncoderRole::Parameter1) + 1;
         auto parameters = GetGpioParameters();
         const size_t index = GetGpioScrollIndex(parameters) + slot - 1;
         if (index >= parameters.size())
         {
             ShowGpioWorkflowMessage(
                 "PARAMETER",
-                parameters.empty() ? "NONE IN THIS PRESET" : "NO SECOND PARAMETER",
+                parameters.empty() ? "NONE IN THIS EFFECT" : "NO PARAMETER IN SLOT",
                 "");
             return true;
         }
@@ -3611,6 +3855,7 @@ void PiPedalModel::HandleGpioInputEvent(const GpioInputEvent &event)
 {
     std::vector<GpioBinding> bindings;
     GpioEncoderRole inputRole = GpioEncoderRole::None;
+    GpioInputType inputType = GpioInputType::Momentary;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
         bindings = pedalboard.gpioBindings();
@@ -3619,9 +3864,16 @@ void PiPedalModel::HandleGpioInputEvent(const GpioInputEvent &event)
             if (input.id_ == event.inputId)
             {
                 inputRole = input.encoderRole();
+                inputType = input.inputType();
                 break;
             }
         }
+    }
+
+    if (inputType == GpioInputType::Navigation)
+    {
+        HandleGpioNavigationEvent(event);
+        return;
     }
 
     if (HandleGpioRoleEvent(event, inputRole))
@@ -3977,14 +4229,14 @@ void PiPedalModel::UpdateGpioDashboard(int32_t activeSlot, bool temporary)
 
     auto parameters = GetGpioParameters();
     GpioDisplayDashboard dashboard;
-    std::array<GpioParameter, 2> shown;
+    std::array<GpioParameter, 4> shown;
     if (!parameters.empty())
     {
         const size_t index = GetGpioScrollIndex(parameters);
         dashboard.scrollIndex = static_cast<int32_t>(index);
         dashboard.scrollPositions =
             static_cast<int32_t>(GpioScrollPositions(parameters.size()));
-        for (size_t slot = 0; slot < 2; ++slot)
+        for (size_t slot = 0; slot < dashboard.controls.size(); ++slot)
         {
             if (index + slot >= parameters.size())
                 break;
@@ -3993,7 +4245,7 @@ void PiPedalModel::UpdateGpioDashboard(int32_t activeSlot, bool temporary)
                 shown[slot].instanceId, shown[slot].symbol, std::nullopt);
         }
         dashboard.activeSlot =
-            activeSlot >= 1 && activeSlot <= 2 &&
+            activeSlot >= 1 && activeSlot <= 4 &&
                     dashboard.controls[activeSlot - 1].assigned
                 ? activeSlot
                 : 0;

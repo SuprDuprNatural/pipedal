@@ -96,22 +96,27 @@ export default function GpioBindingsView() {
     const enabledInputs = useMemo(
         () => settings.inputs.filter(input => input.enabled),
         [settings]);
-    const presetEncoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.PresetBrowser);
-    const scrollEncoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.ParameterScroll);
     const parameter1Encoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.Parameter1);
     const parameter2Encoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.Parameter2);
-    const hasStandardWorkflow = !!scrollEncoder && (!!parameter1Encoder || !!parameter2Encoder);
+    const parameter3Encoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.Parameter3);
+    const parameter4Encoder = enabledInputs.find(input => input.encoderRole === GpioEncoderRole.Parameter4);
+    const navigation = enabledInputs.find(input => input.inputType === GpioInputType.Navigation);
+    const hasStandardWorkflow = !!navigation &&
+        (!!parameter1Encoder || !!parameter2Encoder || !!parameter3Encoder || !!parameter4Encoder);
 
-    // An encoder that holds a standard role turns its own way; only its push
-    // button is left for a mapping, and encoders 1 and 2 use even that.
+    // An encoder that holds a standard role turns its own way; all four push
+    // buttons remain available for mappings. ANO events are reserved.
     const availableEvents = (input: GpioInputConfiguration | undefined): GpioBindingEventType[] => {
         if (!input) return [];
+        if (input.inputType === GpioInputType.Navigation) return [];
         if (input.inputType !== GpioInputType.Encoder) return [GpioBindingEventType.Value];
         switch (input.encoderRole) {
             case GpioEncoderRole.None:
                 return [GpioBindingEventType.EncoderTurn, GpioBindingEventType.EncoderButton];
             case GpioEncoderRole.Parameter1:
             case GpioEncoderRole.Parameter2:
+            case GpioEncoderRole.Parameter3:
+            case GpioEncoderRole.Parameter4:
                 return [GpioBindingEventType.EncoderButton];
             default:
                 return [];
@@ -213,7 +218,7 @@ export default function GpioBindingsView() {
         const status = statusFor(input.id);
         const valueText = !settings.enabled ? "GPIO disabled" : status?.error ? "Error" : !status?.connected ? "Waiting" :
             input.inputType === GpioInputType.Analog ? `${Math.round(status.value * 100)}%` :
-            input.inputType === GpioInputType.Encoder ? (status.buttonPressed ? "Pressed" : "Ready") :
+            input.inputType === GpioInputType.Encoder || input.inputType === GpioInputType.Navigation ? (status.buttonPressed ? "Pressed" : "Ready") :
             status.value >= 0.5 ? "On" : "Off";
         return (
             <Card variant="outlined" key={input.id} sx={{ minWidth: 160, flex: "1 1 180px" }}>
@@ -246,7 +251,7 @@ export default function GpioBindingsView() {
                 <Box>
                     <Typography variant="h6">Hardware controls for this preset</Typography>
                     <Typography variant="body2" color="text.secondary">
-                        The parameter encoders reach every effect in this preset on their own. Mappings here are for footswitches, pedals, and encoder push buttons.
+                        The four parameter encoders control the current OLED window. Mappings here are for footswitches, pedals, and parameter-encoder push buttons.
                     </Typography>
                 </Box>
 
@@ -261,14 +266,15 @@ export default function GpioBindingsView() {
                         <CardContent>
                             <Typography variant="subtitle1">Standard encoder workflow</Typography>
                             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                                The scroll encoder moves through every parameter of every effect in the chain, two at a time, and the OLED
-                                shows those two. Nothing needs to be assigned here: where you are scrolled to is saved with the preset.
+                                The navigation wheel selects a preset, effect, and four-parameter window. The OLED shows all four parameter knobs,
+                                and where you are scrolled to is saved with the preset.
                             </Typography>
                             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                                {presetEncoder && <Chip label={`${presetEncoder.name}: presets`} />}
-                                {scrollEncoder && <Chip label={`${scrollEncoder.name}: scroll parameters / OLED view`} />}
-                                {parameter1Encoder && <Chip label={`${parameter1Encoder.name}: left parameter`} />}
-                                {parameter2Encoder && <Chip label={`${parameter2Encoder.name}: right parameter`} />}
+                                {navigation && <Chip label={`${navigation.name}: all navigation`} />}
+                                {parameter1Encoder && <Chip label={`${parameter1Encoder.name}: parameter 1`} />}
+                                {parameter2Encoder && <Chip label={`${parameter2Encoder.name}: parameter 2`} />}
+                                {parameter3Encoder && <Chip label={`${parameter3Encoder.name}: parameter 3`} />}
+                                {parameter4Encoder && <Chip label={`${parameter4Encoder.name}: parameter 4`} />}
                             </Box>
                         </CardContent>
                     </Card>

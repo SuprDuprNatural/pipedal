@@ -5,7 +5,8 @@ export enum GpioInputType {
     Momentary = 0,
     Latching = 1,
     Analog = 2,
-    Encoder = 3
+    Encoder = 3,
+    Navigation = 4
 }
 
 export enum GpioPull {
@@ -19,7 +20,9 @@ export enum GpioEncoderRole {
     PresetBrowser = 1,
     ParameterScroll = 2,
     Parameter1 = 3,
-    Parameter2 = 4
+    Parameter2 = 4,
+    Parameter3 = 5,
+    Parameter4 = 6
 }
 
 export class GpioInputConfiguration {
@@ -42,7 +45,7 @@ export class GpioInputConfiguration {
         this.i2cDevice = input.i2cDevice ?? "/dev/i2c-1";
         this.i2cAddress = input.i2cAddress ?? 0x36;
         this.encoderReversed = input.encoderReversed ?? true;
-        this.encoderPollIntervalMs = input.encoderPollIntervalMs ?? 10;
+        this.encoderPollIntervalMs = input.encoderPollIntervalMs ?? 1;
         this.encoderRole = input.encoderRole ?? GpioEncoderRole.None;
         return this;
     }
@@ -67,7 +70,7 @@ export class GpioInputConfiguration {
     i2cDevice: string = "/dev/i2c-1";
     i2cAddress: number = 0x36;
     encoderReversed: boolean = true;
-    encoderPollIntervalMs: number = 10;
+    encoderPollIntervalMs: number = 1;
     encoderRole: GpioEncoderRole = GpioEncoderRole.None;
 }
 
@@ -82,6 +85,7 @@ export class GpioDisplaySettings {
         this.refreshIntervalMs = input?.refreshIntervalMs ?? 200;
         this.rotate180 = input?.rotate180 ?? false;
         this.contrast = input?.contrast ?? 160;
+        this.passiveMode = input?.passiveMode ?? GpioDisplayMode.Controls;
         return this;
     }
     clone(): GpioDisplaySettings { return new GpioDisplaySettings().deserialize(this); }
@@ -94,24 +98,74 @@ export class GpioDisplaySettings {
     refreshIntervalMs: number = 200;
     rotate180: boolean = false;
     contrast: number = 160;
+    passiveMode: GpioDisplayMode = GpioDisplayMode.Controls;
+}
+
+export enum GpioDisplayMode {
+    Controls = 0,
+    Waveform = 1,
+    Tuner = 2,
+    Blank = 3
+}
+
+export class GpioLedMatrixSettings {
+    deserialize(input: any): GpioLedMatrixSettings {
+        this.enabled = input?.enabled ?? false;
+        this.i2cDevice = input?.i2cDevice ?? "/dev/i2c-1";
+        this.i2cAddress = input?.i2cAddress ?? 0x70;
+        this.brightness = input?.brightness ?? 6;
+        this.refreshIntervalMs = input?.refreshIntervalMs ?? 16;
+        this.mode = input?.mode ?? GpioLedMatrixMode.Spectrum;
+        this.floorDb = input?.floorDb ?? -48;
+        this.decay = input?.decay ?? 0.65;
+        this.originX = input?.originX ?? 1;
+        this.originY = input?.originY ?? 1;
+        this.rotation = input?.rotation ?? 0;
+        this.mirror = input?.mirror ?? false;
+        this.calibrationMode = input?.calibrationMode ?? false;
+        return this;
+    }
+    clone(): GpioLedMatrixSettings { return new GpioLedMatrixSettings().deserialize(this); }
+    enabled: boolean = false;
+    i2cDevice: string = "/dev/i2c-1";
+    i2cAddress: number = 0x70;
+    brightness: number = 6;
+    refreshIntervalMs: number = 16;
+    mode: GpioLedMatrixMode = GpioLedMatrixMode.Spectrum;
+    floorDb: number = -48;
+    decay: number = 0.65;
+    originX: number = 1;
+    originY: number = 1;
+    rotation: number = 0;
+    mirror: boolean = false;
+    calibrationMode: boolean = false;
+}
+
+export enum GpioLedMatrixMode {
+    Spectrum = 0,
+    Droplets = 1
 }
 
 export class GpioSettings {
     deserialize(input: any): GpioSettings {
         this.enabled = input?.enabled ?? false;
         this.encoderRolesConfigured = input?.encoderRolesConfigured ?? false;
+        this.encoderRoleVersion = input?.encoderRoleVersion ?? 0;
         this.encoderStepsPerRange = input?.encoderStepsPerRange ?? 100;
         this.inputs = (input?.inputs ?? []).map((item: any) => new GpioInputConfiguration().deserialize(item));
         this.display = new GpioDisplaySettings().deserialize(input?.display);
+        this.ledMatrix = new GpioLedMatrixSettings().deserialize(input?.ledMatrix);
         return this;
     }
     clone(): GpioSettings { return new GpioSettings().deserialize(this); }
 
     enabled: boolean = false;
     encoderRolesConfigured: boolean = false;
+    encoderRoleVersion: number = 0;
     encoderStepsPerRange: number = 100;
     inputs: GpioInputConfiguration[] = [];
     display: GpioDisplaySettings = new GpioDisplaySettings();
+    ledMatrix: GpioLedMatrixSettings = new GpioLedMatrixSettings();
 }
 
 export enum GpioBindingMode {
@@ -240,6 +294,7 @@ export class GpioInputStatus {
         this.value = input.value ?? 0;
         this.encoderPosition = input.encoderPosition ?? 0;
         this.buttonPressed = input.buttonPressed ?? false;
+        this.navigationButtons = input.navigationButtons ?? 0;
         this.error = input.error ?? "";
         return this;
     }
@@ -251,5 +306,6 @@ export class GpioInputStatus {
     value: number = 0;
     encoderPosition: number = 0;
     buttonPressed: boolean = false;
+    navigationButtons: number = 0;
     error: string = "";
 }

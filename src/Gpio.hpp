@@ -37,7 +37,8 @@ namespace pipedal
         Momentary = 0,
         Latching = 1,
         Analog = 2,
-        Encoder = 3
+        Encoder = 3,
+        Navigation = 4
     };
 
     enum class GpioPull : int32_t
@@ -47,16 +48,20 @@ namespace pipedal
         Down = 2
     };
 
-    // Optional global roles for a conventional four-encoder controller. The
-    // role belongs to the physical encoder. What Parameter 1 and Parameter 2
-    // currently edit follows the scroll position, which is part of the preset.
+    // Optional global roles for the four effect-parameter encoders. Navigation
+    // is handled by a separate ANO navigation input, so parameter knob turns
+    // never change screens or presets.
     enum class GpioEncoderRole : int32_t
     {
         None = 0,
+        // Values 1 and 2 were used by the original four-encoder workflow.
+        // Keep them readable so old settings can be migrated once.
         PresetBrowser = 1,
         ParameterScroll = 2,
         Parameter1 = 3,
-        Parameter2 = 4
+        Parameter2 = 4,
+        Parameter3 = 5,
+        Parameter4 = 6
     };
 
     class GpioInputConfiguration
@@ -84,12 +89,12 @@ namespace pipedal
         float deadband_ = 0.005f;
         int32_t pollIntervalMs_ = 20;
 
-        // Adafruit seesaw I2C rotary encoder. The push switch is exposed as a
-        // separate event source by each Encoder input.
+        // Adafruit seesaw I2C rotary encoder. Encoder is the QT Rotary Encoder
+        // board; Navigation is the ANO wheel with select/up/left/down/right.
         std::string i2cDevice_ = "/dev/i2c-1";
         int32_t i2cAddress_ = 0x36;
         bool encoderReversed_ = true; // makes clockwise positive on the Adafruit board.
-        int32_t encoderPollIntervalMs_ = 10;
+        int32_t encoderPollIntervalMs_ = 1;
         int32_t encoderRole_ = static_cast<int32_t>(GpioEncoderRole::None);
 
         GpioInputType inputType() const { return static_cast<GpioInputType>(inputType_); }
@@ -111,8 +116,39 @@ namespace pipedal
         int32_t refreshIntervalMs_ = 200;
         bool rotate180_ = false;
         int32_t contrast_ = 160;
+        int32_t passiveMode_ = 0; // GpioDisplayMode wire value.
 
         DECLARE_JSON_MAP(GpioDisplaySettings);
+    };
+
+    enum class GpioLedMatrixMode : int32_t
+    {
+        Spectrum = 0,
+        Droplets = 1
+    };
+
+    class GpioLedMatrixSettings
+    {
+    public:
+        bool enabled_ = false;
+        std::string i2cDevice_ = "/dev/i2c-1";
+        int32_t i2cAddress_ = 0x70;
+        int32_t brightness_ = 6; // HT16K33 brightness, 0..15.
+        int32_t refreshIntervalMs_ = 16;
+        int32_t mode_ = 0; // GpioLedMatrixMode wire value.
+        float floorDb_ = -48.0f;
+        float decay_ = 0.65f;
+
+        // The enclosure exposes a rounded 5x5 portion of the physical 8x8.
+        // These settings place and orient that logical grid. Calibration mode
+        // draws an asymmetric pattern so every transform can be verified.
+        int32_t originX_ = 1;
+        int32_t originY_ = 1;
+        int32_t rotation_ = 0; // clockwise quarter turns.
+        bool mirror_ = false;
+        bool calibrationMode_ = false;
+
+        DECLARE_JSON_MAP(GpioLedMatrixSettings);
     };
 
     class GpioSettings
@@ -120,15 +156,17 @@ namespace pipedal
     public:
         bool enabled_ = false;
         bool encoderRolesConfigured_ = false;
+        int32_t encoderRoleVersion_ = 0;
         // Detents needed to move a continuous parameter across its whole range.
         // Parameters that declare their own steps, and integer, toggled and
         // enumerated parameters, use their declared resolution instead.
         int32_t encoderStepsPerRange_ = 100;
         std::vector<GpioInputConfiguration> inputs_;
         GpioDisplaySettings display_;
+        GpioLedMatrixSettings ledMatrix_;
 
-        // Assign the standard four-encoder workflow to an older configuration
-        // that predates roles. Returns true when the settings were changed.
+        // Assign four parameter roles and migrate the earlier preset/scroll/
+        // two-parameter layout. Returns true when settings were changed.
         bool EnsureStandardEncoderRoles();
 
         DECLARE_JSON_MAP(GpioSettings);
@@ -251,6 +289,7 @@ namespace pipedal
         // the wire format for compatibility but is always zero.
         int64_t encoderPosition_ = 0;
         bool buttonPressed_ = false;
+        uint32_t navigationButtons_ = 0;
         std::string error_;
 
         DECLARE_JSON_MAP(GpioInputStatus);
@@ -263,6 +302,16 @@ namespace pipedal
         EncoderButton = 2
     };
 
+    enum class GpioNavigationButton : int32_t
+    {
+        None = 0,
+        Select = 1,
+        Up = 2,
+        Left = 3,
+        Down = 4,
+        Right = 5
+    };
+
     class GpioInputEvent
     {
     public:
@@ -273,6 +322,7 @@ namespace pipedal
         bool initial = false;
         GpioInputEventType eventType = GpioInputEventType::Value;
         int32_t delta = 0;
+        GpioNavigationButton navigationButton = GpioNavigationButton::None;
     };
 
     class GpioDisplayMessage
@@ -289,12 +339,14 @@ namespace pipedal
     {
         Controls = 0,
         Waveform = 1,
-        Tuner = 2
+        Tuner = 2,
+        Blank = 3
     };
 
-    // One parameter that the web interface would show a control for, somewhere
-    // in the current effect chain. The parameter encoder scrolls through these
-    // in chain order; the two parameter knobs edit the two currently shown.
+
+    // One parameter that the web interface would show a control for. The
+    // navigation wheel scrolls within the selected effect; the four parameter
+    // knobs edit the four currently shown.
     class GpioParameter
     {
     public:
@@ -308,8 +360,8 @@ namespace pipedal
     {
     public:
         bool assigned = false;
-        // The two shown parameters are adjacent in one list spanning every
-        // effect, so each carries the effect it belongs to.
+        // Every control carries its effect name so transient mapping messages
+        // can reuse the same display formatting.
         std::string effectName;
         std::string label;
         std::string value;
@@ -319,10 +371,19 @@ namespace pipedal
     class GpioDisplayDashboard
     {
     public:
-        std::array<GpioDisplayControl, 2> controls;
-        int32_t activeSlot = 0; // 0 = neither, otherwise 1 or 2.
+        std::array<GpioDisplayControl, 4> controls;
+        int32_t activeSlot = 0; // 0 = neither, otherwise 1..4.
         int32_t scrollIndex = 0;
         int32_t scrollPositions = 0; // 0 when the chain has no parameters.
+    };
+
+    class GpioDisplayMenu
+    {
+    public:
+        std::string title;
+        std::string detail;
+        std::vector<std::string> items;
+        int32_t selectedIndex = 0;
     };
 
     // std::isfinite is not usable anywhere in this feature: PiPedal release
@@ -359,7 +420,9 @@ namespace pipedal
         virtual void ClearDisplayMessage() = 0;
         virtual void ShowControlDashboard(const GpioDisplayDashboard &dashboard) = 0;
         virtual void ShowTemporaryControlDashboard(const GpioDisplayDashboard &dashboard) = 0;
+        virtual void ShowTemporaryMenu(const GpioDisplayMenu &menu) = 0;
         virtual GpioDisplayMode CycleDisplayMode() = 0;
+        virtual void SetDisplayMode(GpioDisplayMode mode) = 0;
         virtual GpioDisplayMode GetDisplayMode() const = 0;
         virtual void Configure(const GpioSettings &settings) = 0;
         virtual void Refresh() = 0;

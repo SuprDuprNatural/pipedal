@@ -78,6 +78,40 @@ TEST_CASE("I2C encoder and display addresses are validated", "[gpio]")
     REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
 }
 
+TEST_CASE("ANO navigation and HT16K33 matrix settings are validated", "[gpio]")
+{
+    GpioSettings settings;
+    settings.enabled_ = true;
+
+    GpioInputConfiguration navigation;
+    navigation.id_ = "navigation";
+    navigation.inputType_ = static_cast<int32_t>(GpioInputType::Navigation);
+    navigation.i2cAddress_ = 0x49;
+    settings.inputs_.push_back(navigation);
+    settings.ledMatrix_.enabled_ = true;
+    settings.ledMatrix_.i2cAddress_ = 0x70;
+    settings.display_.passiveMode_ = static_cast<int32_t>(GpioDisplayMode::Blank);
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+
+    settings.ledMatrix_.refreshIntervalMs_ = 10;
+    REQUIRE_NOTHROW(GpioManager::Validate(settings));
+    settings.ledMatrix_.refreshIntervalMs_ = 9;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+    settings.ledMatrix_.refreshIntervalMs_ = 16;
+
+    settings.ledMatrix_.i2cAddress_ = 0x49;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+    settings.ledMatrix_.i2cAddress_ = 0x70;
+    settings.ledMatrix_.originX_ = 4;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+    settings.ledMatrix_.originX_ = 1;
+    settings.ledMatrix_.floorDb_ = -3.0f;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+    settings.ledMatrix_.floorDb_ = -48.0f;
+    settings.ledMatrix_.mode_ = 2;
+    REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+}
+
 TEST_CASE("Standard encoder roles migrate once and remain unique", "[gpio]")
 {
     GpioSettings settings;
@@ -93,15 +127,55 @@ TEST_CASE("Standard encoder roles migrate once and remain unique", "[gpio]")
 
     REQUIRE(settings.EnsureStandardEncoderRoles());
     REQUIRE(settings.encoderRolesConfigured_);
-    REQUIRE(settings.inputs_[3].encoderRole() == GpioEncoderRole::PresetBrowser);
-    REQUIRE(settings.inputs_[2].encoderRole() == GpioEncoderRole::ParameterScroll);
-    REQUIRE(settings.inputs_[1].encoderRole() == GpioEncoderRole::Parameter1);
-    REQUIRE(settings.inputs_[0].encoderRole() == GpioEncoderRole::Parameter2);
+    REQUIRE(settings.encoderRoleVersion_ == 4);
+    REQUIRE(settings.inputs_[3].encoderRole() == GpioEncoderRole::Parameter1);
+    REQUIRE(settings.inputs_[2].encoderRole() == GpioEncoderRole::Parameter2);
+    REQUIRE(settings.inputs_[1].encoderRole() == GpioEncoderRole::Parameter3);
+    REQUIRE(settings.inputs_[0].encoderRole() == GpioEncoderRole::Parameter4);
     REQUIRE_FALSE(settings.EnsureStandardEncoderRoles());
     REQUIRE_NOTHROW(GpioManager::Validate(settings));
 
     settings.inputs_[0].encoderRole_ = settings.inputs_[1].encoderRole_;
     REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+}
+
+TEST_CASE("Encoder reliability migration preserves assigned roles", "[gpio]")
+{
+    GpioSettings settings;
+    settings.enabled_ = true;
+    settings.encoderRolesConfigured_ = true;
+    settings.encoderRoleVersion_ = 3;
+    for (int32_t index = 0; index < 4; ++index)
+    {
+        GpioInputConfiguration encoder;
+        encoder.id_ = "encoder-" + std::to_string(index + 1);
+        encoder.inputType_ = static_cast<int32_t>(GpioInputType::Encoder);
+        encoder.i2cAddress_ = 0x3D - index;
+        encoder.encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter1) + index;
+        encoder.encoderPollIntervalMs_ = 5;
+        encoder.debounceMs_ = 30;
+        settings.inputs_.push_back(encoder);
+    }
+    GpioInputConfiguration navigation;
+    navigation.id_ = "navigation";
+    navigation.inputType_ = static_cast<int32_t>(GpioInputType::Navigation);
+    navigation.i2cAddress_ = 0x49;
+    navigation.encoderPollIntervalMs_ = 5;
+    navigation.debounceMs_ = 30;
+    settings.inputs_.push_back(navigation);
+
+    REQUIRE(settings.EnsureStandardEncoderRoles());
+    REQUIRE(settings.encoderRoleVersion_ == 4);
+    for (int32_t index = 0; index < 4; ++index)
+    {
+        REQUIRE(settings.inputs_[static_cast<size_t>(index)].encoderRole_ ==
+                static_cast<int32_t>(GpioEncoderRole::Parameter1) + index);
+        REQUIRE(settings.inputs_[static_cast<size_t>(index)].encoderPollIntervalMs_ == 1);
+        REQUIRE(settings.inputs_[static_cast<size_t>(index)].debounceMs_ == 10);
+    }
+    REQUIRE(settings.inputs_.back().encoderPollIntervalMs_ == 1);
+    REQUIRE(settings.inputs_.back().debounceMs_ == 10);
+    REQUIRE_FALSE(settings.EnsureStandardEncoderRoles());
 }
 
 TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
@@ -118,7 +192,13 @@ TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
     source.display_.enabled_ = true;
     source.display_.overlayTimeoutMs_ = 4250;
     source.encoderRolesConfigured_ = true;
+    source.encoderRoleVersion_ = 2;
     source.encoderStepsPerRange_ = 64;
+    source.ledMatrix_.enabled_ = true;
+    source.ledMatrix_.brightness_ = 9;
+    source.ledMatrix_.mode_ = static_cast<int32_t>(GpioLedMatrixMode::Droplets);
+    source.ledMatrix_.rotation_ = 3;
+    source.ledMatrix_.calibrationMode_ = true;
 
     std::stringstream json;
     json_writer writer(json, true);
@@ -130,6 +210,7 @@ TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
 
     REQUIRE(restored.enabled_);
     REQUIRE(restored.encoderRolesConfigured_);
+    REQUIRE(restored.encoderRoleVersion_ == 2);
     REQUIRE(restored.encoderStepsPerRange_ == 64);
     REQUIRE(restored.inputs_.size() == 1);
     REQUIRE(restored.inputs_[0].id_ == "switch-a");
@@ -138,6 +219,11 @@ TEST_CASE("GPIO configuration and mappings round-trip through JSON", "[gpio]")
     REQUIRE_FALSE(restored.inputs_[0].activeLow_);
     REQUIRE(restored.display_.enabled_);
     REQUIRE(restored.display_.overlayTimeoutMs_ == 4250);
+    REQUIRE(restored.ledMatrix_.enabled_);
+    REQUIRE(restored.ledMatrix_.brightness_ == 9);
+    REQUIRE(restored.ledMatrix_.mode_ == static_cast<int32_t>(GpioLedMatrixMode::Droplets));
+    REQUIRE(restored.ledMatrix_.rotation_ == 3);
+    REQUIRE(restored.ledMatrix_.calibrationMode_);
 
     GpioBinding binding;
     binding.inputId_ = "switch-a";

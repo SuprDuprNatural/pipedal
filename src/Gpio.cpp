@@ -21,6 +21,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 
 #if defined(__linux__)
@@ -67,14 +68,33 @@ JSON_MAP_REFERENCE(GpioDisplaySettings, waveformOutput)
 JSON_MAP_REFERENCE(GpioDisplaySettings, refreshIntervalMs)
 JSON_MAP_REFERENCE(GpioDisplaySettings, rotate180)
 JSON_MAP_REFERENCE(GpioDisplaySettings, contrast)
+JSON_MAP_REFERENCE(GpioDisplaySettings, passiveMode)
+JSON_MAP_END()
+
+JSON_MAP_BEGIN(GpioLedMatrixSettings)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, enabled)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, i2cDevice)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, i2cAddress)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, brightness)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, refreshIntervalMs)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, mode)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, floorDb)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, decay)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, originX)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, originY)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, rotation)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, mirror)
+JSON_MAP_REFERENCE(GpioLedMatrixSettings, calibrationMode)
 JSON_MAP_END()
 
 JSON_MAP_BEGIN(GpioSettings)
 JSON_MAP_REFERENCE(GpioSettings, enabled)
 JSON_MAP_REFERENCE(GpioSettings, encoderRolesConfigured)
+JSON_MAP_REFERENCE(GpioSettings, encoderRoleVersion)
 JSON_MAP_REFERENCE(GpioSettings, encoderStepsPerRange)
 JSON_MAP_REFERENCE(GpioSettings, inputs)
 JSON_MAP_REFERENCE(GpioSettings, display)
+JSON_MAP_REFERENCE(GpioSettings, ledMatrix)
 JSON_MAP_END()
 
 JSON_MAP_BEGIN(GpioBinding)
@@ -127,6 +147,7 @@ JSON_MAP_REFERENCE(GpioInputStatus, connected)
 JSON_MAP_REFERENCE(GpioInputStatus, value)
 JSON_MAP_REFERENCE(GpioInputStatus, encoderPosition)
 JSON_MAP_REFERENCE(GpioInputStatus, buttonPressed)
+JSON_MAP_REFERENCE(GpioInputStatus, navigationButtons)
 JSON_MAP_REFERENCE(GpioInputStatus, error)
 JSON_MAP_END()
 
@@ -338,15 +359,23 @@ namespace
         bool ReadRegister(uint8_t module, uint8_t function, uint8_t *data, size_t size, std::string *error)
         {
             uint8_t request[2]{module, function};
-            if (!Write(request, sizeof(request), error))
-                return false;
-            std::this_thread::sleep_for(std::chrono::microseconds(300));
-            if (::read(fd_, data, size) != static_cast<ssize_t>(size))
+            // A seesaw can briefly stretch or NACK a register transaction while
+            // it services its encoder interrupt. Retry the complete pointer
+            // write + read so a transient does not become a lost control poll.
+            for (int attempt = 0; attempt < 3; ++attempt)
             {
-                *error = ErrnoText("I2C read failed");
-                return false;
+                if (::write(fd_, request, sizeof(request)) ==
+                    static_cast<ssize_t>(sizeof(request)))
+                {
+                    std::this_thread::sleep_for(std::chrono::microseconds(300));
+                    if (::read(fd_, data, size) == static_cast<ssize_t>(size))
+                        return true;
+                }
+                if (attempt != 2)
+                    std::this_thread::sleep_for(std::chrono::microseconds(500));
             }
-            return true;
+            *error = ErrnoText("I2C register read failed");
+            return false;
         }
 
         void Close()
@@ -375,6 +404,7 @@ namespace
         {
             if (!device_.Open(configuration.i2cDevice_, configuration.i2cAddress_, error))
                 return false;
+            positionInitialized_ = false;
 
             // The encoder push switch is seesaw GPIO 24. Configure it as an
             // input with pull-up, matching Adafruit's reference implementation.
@@ -388,12 +418,20 @@ namespace
             uint8_t high[6]{0x01, 0x05,
                             static_cast<uint8_t>(buttonMask >> 24), static_cast<uint8_t>(buttonMask >> 16),
                             static_cast<uint8_t>(buttonMask >> 8), static_cast<uint8_t>(buttonMask)};
+            uint8_t interrupts[6]{0x01, 0x08,
+                                  static_cast<uint8_t>(buttonMask >> 24), static_cast<uint8_t>(buttonMask >> 16),
+                                  static_cast<uint8_t>(buttonMask >> 8), static_cast<uint8_t>(buttonMask)};
             return device_.Write(direction, sizeof(direction), error) &&
                    device_.Write(pull, sizeof(pull), error) &&
-                   device_.Write(high, sizeof(high), error);
+                   device_.Write(high, sizeof(high), error) &&
+                   device_.Write(interrupts, sizeof(interrupts), error);
         }
 
-        bool Read(int32_t *delta, bool *buttonPressed, std::string *error)
+        bool Read(
+            int32_t *delta,
+            bool *buttonPressed,
+            bool *buttonActivity,
+            std::string *error)
         {
             uint8_t gpioBytes[4]{};
             if (!device_.ReadRegister(0x01, 0x04, gpioBytes, sizeof(gpioBytes), error))
@@ -404,38 +442,224 @@ namespace
                             gpioBytes[3];
             *buttonPressed = (gpio & (1u << 24)) == 0;
 
-            // The seesaw has a purpose-built delta-since-last-read register.
-            // Do not derive movement from its lifetime absolute position: one
-            // corrupt absolute sample can otherwise look like billions of
-            // clicks. A human cannot produce 64 detents in one 10 ms poll, so
-            // retry and then discard anything outside that generous bound.
+            if (!ReadEncoderPosition(delta, error))
+                return false;
+
+            // INTFLAG latches GPIO activity until read. Polling it recovers a
+            // complete short press/release that occurred between host samples.
+            uint8_t flagBytes[4]{};
+            if (!device_.ReadRegister(0x01, 0x0A, flagBytes, sizeof(flagBytes), error))
+                return false;
+            const uint32_t flags =
+                (static_cast<uint32_t>(flagBytes[0]) << 24) |
+                (static_cast<uint32_t>(flagBytes[1]) << 16) |
+                (static_cast<uint32_t>(flagBytes[2]) << 8) |
+                flagBytes[3];
+            *buttonActivity = (flags & (1u << 24)) != 0;
+            return true;
+        }
+
+    private:
+        bool ReadEncoderPosition(int32_t *delta, std::string *error)
+        {
+            // Follow Adafruit's reference usage and sample the lifetime
+            // position register. Unlike the delta register, a failed host read
+            // cannot consume movement; the next successful sample catches up.
             constexpr int32_t maxPlausibleDelta = 64;
             for (int attempt = 0; attempt < 2; ++attempt)
             {
-                uint8_t deltaBytes[4]{};
-                if (!device_.ReadRegister(0x11, 0x40, deltaBytes, sizeof(deltaBytes), error))
+                uint8_t positionBytes[4]{};
+                if (!device_.ReadRegister(0x11, 0x30, positionBytes, sizeof(positionBytes), error))
                     return false;
-                uint32_t rawDelta = (static_cast<uint32_t>(deltaBytes[0]) << 24) |
-                                    (static_cast<uint32_t>(deltaBytes[1]) << 16) |
-                                    (static_cast<uint32_t>(deltaBytes[2]) << 8) |
-                                    deltaBytes[3];
-                int32_t candidate = static_cast<int32_t>(rawDelta);
+                const uint32_t rawPosition =
+                    (static_cast<uint32_t>(positionBytes[0]) << 24) |
+                    (static_cast<uint32_t>(positionBytes[1]) << 16) |
+                    (static_cast<uint32_t>(positionBytes[2]) << 8) |
+                    positionBytes[3];
+                if (!positionInitialized_)
+                {
+                    position_ = rawPosition;
+                    positionInitialized_ = true;
+                    *delta = 0;
+                    return true;
+                }
+                const int32_t candidate = static_cast<int32_t>(rawPosition - position_);
                 if (candidate >= -maxPlausibleDelta && candidate <= maxPlausibleDelta)
                 {
+                    position_ = rawPosition;
                     *delta = candidate;
                     return true;
                 }
                 std::this_thread::sleep_for(std::chrono::microseconds(500));
             }
 
-            // A transient invalid word is not a connection failure and should
-            // never flash through the UI, OLED, or parameter path.
+            // Resynchronize after a persistent implausible word so one bad
+            // sample cannot strand this encoder forever.
+            positionInitialized_ = false;
             *delta = 0;
             return true;
         }
 
-    private:
         I2cDevice device_;
+        uint32_t position_ = 0;
+        bool positionInitialized_ = false;
+    };
+
+    class SeesawNavigationEncoder
+    {
+    public:
+        bool Open(const GpioInputConfiguration &configuration, std::string *error)
+        {
+            if (!device_.Open(configuration.i2cDevice_, configuration.i2cAddress_, error))
+                return false;
+            positionInitialized_ = false;
+
+            // ANO adapter firmware exposes select/up/left/down/right as seesaw
+            // GPIO pins 1..5. All five switches close to ground.
+            constexpr uint32_t buttonMask = 0x3Eu;
+            uint8_t direction[6]{0x01, 0x03,
+                                 static_cast<uint8_t>(buttonMask >> 24), static_cast<uint8_t>(buttonMask >> 16),
+                                 static_cast<uint8_t>(buttonMask >> 8), static_cast<uint8_t>(buttonMask)};
+            uint8_t pull[6]{0x01, 0x0B,
+                            static_cast<uint8_t>(buttonMask >> 24), static_cast<uint8_t>(buttonMask >> 16),
+                            static_cast<uint8_t>(buttonMask >> 8), static_cast<uint8_t>(buttonMask)};
+            uint8_t high[6]{0x01, 0x05,
+                            static_cast<uint8_t>(buttonMask >> 24), static_cast<uint8_t>(buttonMask >> 16),
+                            static_cast<uint8_t>(buttonMask >> 8), static_cast<uint8_t>(buttonMask)};
+            uint8_t interrupts[6]{0x01, 0x08,
+                                  static_cast<uint8_t>(buttonMask >> 24), static_cast<uint8_t>(buttonMask >> 16),
+                                  static_cast<uint8_t>(buttonMask >> 8), static_cast<uint8_t>(buttonMask)};
+            return device_.Write(direction, sizeof(direction), error) &&
+                   device_.Write(pull, sizeof(pull), error) &&
+                   device_.Write(high, sizeof(high), error) &&
+                   device_.Write(interrupts, sizeof(interrupts), error);
+        }
+
+        bool Read(
+            int32_t *delta,
+            uint32_t *pressedButtons,
+            uint32_t *buttonActivity,
+            std::string *error)
+        {
+            uint8_t gpioBytes[4]{};
+            if (!device_.ReadRegister(0x01, 0x04, gpioBytes, sizeof(gpioBytes), error))
+                return false;
+            const uint32_t gpio = (static_cast<uint32_t>(gpioBytes[0]) << 24) |
+                                  (static_cast<uint32_t>(gpioBytes[1]) << 16) |
+                                  (static_cast<uint32_t>(gpioBytes[2]) << 8) |
+                                  gpioBytes[3];
+            *pressedButtons = ((~gpio) >> 1) & 0x1Fu;
+
+            if (!ReadEncoderPosition(delta, error))
+                return false;
+
+            uint8_t flagBytes[4]{};
+            if (!device_.ReadRegister(0x01, 0x0A, flagBytes, sizeof(flagBytes), error))
+                return false;
+            const uint32_t flags =
+                (static_cast<uint32_t>(flagBytes[0]) << 24) |
+                (static_cast<uint32_t>(flagBytes[1]) << 16) |
+                (static_cast<uint32_t>(flagBytes[2]) << 8) |
+                flagBytes[3];
+            *buttonActivity = (flags >> 1) & 0x1Fu;
+            return true;
+        }
+
+    private:
+        bool ReadEncoderPosition(int32_t *delta, std::string *error)
+        {
+            uint8_t positionBytes[4]{};
+            if (!device_.ReadRegister(0x11, 0x30, positionBytes, sizeof(positionBytes), error))
+                return false;
+            const uint32_t rawPosition =
+                (static_cast<uint32_t>(positionBytes[0]) << 24) |
+                (static_cast<uint32_t>(positionBytes[1]) << 16) |
+                (static_cast<uint32_t>(positionBytes[2]) << 8) |
+                positionBytes[3];
+            const auto now = std::chrono::steady_clock::now();
+            if (!positionInitialized_)
+            {
+                position_ = rawPosition;
+                positionInitialized_ = true;
+                pendingPositionInitialized_ = false;
+                *delta = 0;
+                return true;
+            }
+
+            const int64_t candidate = static_cast<int32_t>(rawPosition - position_);
+            if (candidate == 0)
+            {
+                pendingPositionInitialized_ = false;
+                *delta = 0;
+                return true;
+            }
+
+            // While the player is already turning, pass normal motion through
+            // without adding latency. At idle, require either the same new
+            // position twice or two small steps in the same direction. This
+            // rejects the occasional corrupted low byte that otherwise looks
+            // like several unsolicited navigation detents.
+            constexpr int64_t maximumActiveDelta = 8;
+            constexpr int64_t maximumIdleStep = 2;
+            if (now < activeUntil_ && std::abs(candidate) <= maximumActiveDelta)
+            {
+                position_ = rawPosition;
+                pendingPositionInitialized_ = false;
+                activeUntil_ = now + std::chrono::milliseconds(120);
+                *delta = static_cast<int32_t>(candidate);
+                return true;
+            }
+
+            if (pendingPositionInitialized_ && rawPosition != pendingPosition_)
+            {
+                const int64_t first = static_cast<int32_t>(pendingPosition_ - position_);
+                const int64_t continuation =
+                    static_cast<int32_t>(rawPosition - pendingPosition_);
+                const bool sameDirection =
+                    (first > 0 && continuation > 0) ||
+                    (first < 0 && continuation < 0);
+                if (sameDirection &&
+                    std::abs(first) <= maximumIdleStep &&
+                    std::abs(continuation) <= maximumIdleStep &&
+                    std::abs(candidate) <= maximumActiveDelta)
+                {
+                    position_ = rawPosition;
+                    pendingPositionInitialized_ = false;
+                    activeUntil_ = now + std::chrono::milliseconds(120);
+                    *delta = static_cast<int32_t>(candidate);
+                    return true;
+                }
+            }
+
+            if (!pendingPositionInitialized_ || rawPosition != pendingPosition_)
+            {
+                pendingPosition_ = rawPosition;
+                pendingPositionInitialized_ = true;
+                *delta = 0;
+                return true;
+            }
+
+            // A persistent jump larger than a person can produce between two
+            // idle samples is used only to re-establish the baseline. Never
+            // replay it as a burst of menu movement.
+            pendingPositionInitialized_ = false;
+            position_ = rawPosition;
+            if (std::abs(candidate) <= maximumIdleStep)
+            {
+                activeUntil_ = now + std::chrono::milliseconds(120);
+                *delta = static_cast<int32_t>(candidate);
+                return true;
+            }
+            *delta = 0;
+            return true;
+        }
+
+        I2cDevice device_;
+        uint32_t position_ = 0;
+        uint32_t pendingPosition_ = 0;
+        bool positionInitialized_ = false;
+        bool pendingPositionInitialized_ = false;
+        std::chrono::steady_clock::time_point activeUntil_{};
     };
 
     // Small SSD1306 renderer. Text is deliberately uppercase: this compact
@@ -496,34 +720,144 @@ namespace
         bool DrawDashboard(const GpioDisplayDashboard &dashboard, std::string *error)
         {
             Clear();
-            if (!dashboard.controls[0].assigned && !dashboard.controls[1].assigned)
+            if (std::none_of(
+                    dashboard.controls.begin(), dashboard.controls.end(),
+                    [](const GpioDisplayControl &control) { return control.assigned; }))
             {
                 DrawTextCentered(64, 20, "NO PARAMETERS", 1, 21);
-                DrawTextCentered(64, 34, "ADD AN EFFECT", 1, 21);
+                DrawTextCentered(64, 34, "SELECT AN EFFECT", 1, 21);
                 return Flush(error);
             }
 
-            // The two shown parameters are adjacent in one list that spans the
-            // whole chain, so each column names its own effect. A single wide
-            // heading is clearer while both are in the same effect.
-            const auto &left = dashboard.controls[0];
-            const auto &right = dashboard.controls[1];
-            if (left.assigned && right.assigned && left.effectName == right.effectName)
+            // Give each contiguous effect its own header spanning exactly the
+            // parameter columns it owns. Effect-boundary dividers extend into
+            // the heading; ordinary parameter dividers begin below it.
+            size_t firstSlot = 0;
+            while (firstSlot < dashboard.controls.size())
             {
-                DrawTextCentered(64, 0, left.effectName, 1, 21);
+                if (!dashboard.controls[firstSlot].assigned)
+                {
+                    ++firstSlot;
+                    continue;
+                }
+                size_t lastSlot = firstSlot;
+                while (lastSlot + 1 < dashboard.controls.size() &&
+                       dashboard.controls[lastSlot + 1].assigned &&
+                       dashboard.controls[lastSlot + 1].effectName ==
+                           dashboard.controls[firstSlot].effectName)
+                    ++lastSlot;
+                const int left = static_cast<int>(firstSlot) * 32;
+                const int right = static_cast<int>(lastSlot + 1) * 32;
+                const size_t maxCharacters = static_cast<size_t>(
+                    std::max(1, (right - left - 4) / 6));
+                DrawTextCentered(
+                    (left + right) / 2, 0,
+                    dashboard.controls[firstSlot].effectName,
+                    1, maxCharacters);
+                firstSlot = lastSlot + 1;
+            }
+            DrawHorizontal(0, 8, 128);
+            for (int column = 1; column < 4; ++column)
+            {
+                const auto &left = dashboard.controls[static_cast<size_t>(column - 1)];
+                const auto &right = dashboard.controls[static_cast<size_t>(column)];
+                const bool effectBoundary =
+                    left.assigned && right.assigned &&
+                    left.effectName != right.effectName;
+                for (int y = effectBoundary ? 0 : 12; y <= 52; ++y)
+                    Pixel(column * 32, y);
+            }
+            for (size_t slot = 0; slot < dashboard.controls.size(); ++slot)
+                DrawKnob(
+                    16 + static_cast<int>(slot) * 32,
+                    dashboard.controls[slot],
+                    dashboard.activeSlot == static_cast<int32_t>(slot + 1));
+            DrawScrollBar(dashboard.scrollIndex, dashboard.scrollPositions);
+            return Flush(error);
+        }
+
+        bool DrawMenu(const GpioDisplayMenu &menu, std::string *error)
+        {
+            Clear();
+            if (menu.items.empty())
+            {
+                DrawTextCentered(64, 0, menu.title, 1, 21);
+                DrawHorizontal(0, 9, 128);
+                DrawTextCentered(64, 27, "NONE", 1, 21);
+            }
+            else if (menu.title == "PRESETS")
+            {
+                // The fixed vertical label costs only eight pixels. Two
+                // columns then fit eight presets per page, with the selector
+                // consuming horizontal space only on the active row.
+                constexpr std::string_view label = "PRESET";
+                for (size_t index = 0; index < label.size(); ++index)
+                    DrawText(
+                        0, 1 + static_cast<int>(index) * 9,
+                        std::string(1, label[index]), 1);
+                for (int y = 0; y < 64; ++y)
+                    Pixel(7, y);
+                for (int y = 0; y < 64; ++y)
+                    Pixel(68, y);
+
+                const int32_t selected = std::clamp<int32_t>(
+                    menu.selectedIndex, 0,
+                    static_cast<int32_t>(menu.items.size()) - 1);
+                constexpr int32_t itemsPerPage = 8;
+                const int32_t pageStart = selected / itemsPerPage * itemsPerPage;
+                for (int32_t slot = 0; slot < itemsPerPage; ++slot)
+                {
+                    const int32_t item = pageStart + slot;
+                    if (item >= static_cast<int32_t>(menu.items.size()))
+                        break;
+                    const int column = slot / 4;
+                    const int row = slot % 4;
+                    const int lineStart = column == 0 ? 10 : 71;
+                    const int lineEnd = column == 0 ? 67 : 127;
+                    const int y = 3 + row * 15;
+                    const bool active = item == selected;
+                    int textX = lineStart;
+                    if (active)
+                    {
+                        DrawText(lineStart, y, ">", 1);
+                        textX += 7;
+                    }
+                    const size_t maxCharacters = static_cast<size_t>(
+                        std::max(1, (lineEnd - textX + 1) / 6));
+                    DrawText(
+                        textX, y,
+                        menu.items[static_cast<size_t>(item)].substr(0, maxCharacters),
+                        1);
+                }
             }
             else
             {
-                if (left.assigned) DrawTextCentered(32, 0, left.effectName, 1, 10);
-                if (right.assigned) DrawTextCentered(96, 0, right.effectName, 1, 10);
+                DrawTextCentered(64, 0, menu.title, 1, 21);
+                DrawHorizontal(0, 9, 128);
+                const int32_t selected = std::clamp<int32_t>(
+                    menu.selectedIndex, 0, static_cast<int32_t>(menu.items.size()) - 1);
+                constexpr int32_t visibleRows = 4;
+                const int32_t maximumStart = std::max<int32_t>(
+                    0, static_cast<int32_t>(menu.items.size()) - visibleRows);
+                const int32_t first = std::clamp<int32_t>(
+                    selected - 1, 0, maximumStart);
+                for (int32_t row = 0; row < visibleRows; ++row)
+                {
+                    const int32_t item = first + row;
+                    if (item >= static_cast<int32_t>(menu.items.size()))
+                        break;
+                    const int y = 13 + row * 12;
+                    const bool active = item == selected;
+                    const int textX = active ? 9 : 1;
+                    if (active)
+                        DrawText(1, y, ">", 1);
+                    DrawText(
+                        textX, y,
+                        menu.items[static_cast<size_t>(item)].substr(
+                            0, active ? 19 : 21),
+                        1);
+                }
             }
-            DrawHorizontal(0, 8, 128);
-            // Only across the knob band: a full-height rule crowds a
-            // ten-character parameter name.
-            for (int y = 12; y <= 36; ++y) Pixel(64, y);
-            DrawKnob(32, 25, left, dashboard.activeSlot == 1);
-            DrawKnob(96, 25, right, dashboard.activeSlot == 2);
-            DrawScrollBar(dashboard.scrollIndex, dashboard.scrollPositions);
             return Flush(error);
         }
 
@@ -604,6 +938,12 @@ namespace
             return Flush(error);
         }
 
+        bool DrawBlank(std::string *error)
+        {
+            Clear();
+            return Flush(error);
+        }
+
     private:
         static std::array<uint8_t, 5> Glyph(char c)
         {
@@ -669,13 +1009,10 @@ namespace
             const int width = static_cast<int>(clipped.size()) * 6 * scale;
             DrawText(centreX - width / 2, y, clipped, scale);
         }
-        void DrawKnob(
-            int centreX,
-            int centreY,
-            const GpioDisplayControl &control,
-            bool active)
+        void DrawKnob(int centreX, const GpioDisplayControl &control, bool active)
         {
-            constexpr int radius = 11;
+            constexpr int centreY = 21;
+            constexpr int radius = 8;
             DrawCircle(centreX, centreY, radius);
             if (control.assigned)
             {
@@ -683,9 +1020,9 @@ namespace
                 const float normalized = std::clamp(control.normalizedValue, 0.0f, 1.0f);
                 const float angle = (-225.0f + normalized * 270.0f) * pi / 180.0f;
                 const int x = centreX + static_cast<int>(
-                                              std::lround(std::cos(angle) * (radius - 3)));
+                                              std::lround(std::cos(angle) * (radius - 2)));
                 const int y = centreY + static_cast<int>(
-                                              std::lround(std::sin(angle) * (radius - 3)));
+                                              std::lround(std::sin(angle) * (radius - 2)));
                 DrawLine(centreX, centreY, x, y);
                 if (active)
                     FillRect(centreX - 2, centreY - 2, 5, 5);
@@ -697,18 +1034,18 @@ namespace
                 DrawHorizontal(centreX - 4, centreY, 9);
             }
 
-            DrawTextCentered(centreX, 40,
+            DrawTextCentered(centreX, 33,
                              control.assigned ? control.label : "NONE",
-                             1, 10);
-            DrawTextCentered(centreX, 50,
+                             1, 5);
+            DrawTextCentered(centreX, 43,
                              control.assigned ? control.value : "--",
-                             1, 10);
+                             1, 5);
             if (active)
-                DrawHorizontal(centreX - 29, 58, 59);
+                DrawHorizontal(centreX - 13, 53, 27);
         }
 
         // A whole-width bar along the bottom edge, showing how far through the
-        // chain's parameters the two shown knobs are.
+        // complete loaded parameter sequence the four shown knobs are.
         void DrawScrollBar(int32_t index, int32_t positions)
         {
             if (positions <= 1)
@@ -784,8 +1121,347 @@ namespace
         I2cDevice device_;
         std::array<uint8_t, 1024> framebuffer_{};
     };
+
+    class Ht16k33Matrix
+    {
+    public:
+        ~Ht16k33Matrix()
+        {
+            if (opened_)
+            {
+                std::string ignored;
+                Clear(&ignored);
+            }
+        }
+
+        bool Open(const GpioLedMatrixSettings &settings, std::string *error)
+        {
+            if (!device_.Open(settings.i2cDevice_, settings.i2cAddress_, error))
+                return false;
+            const uint8_t oscillatorOn = 0x21;
+            const uint8_t displayOn = 0x81;
+            const uint8_t brightness = static_cast<uint8_t>(
+                0xE0 | std::clamp(settings.brightness_, 0, 15));
+            opened_ = device_.Write(&oscillatorOn, 1, error) &&
+                      device_.Write(&displayOn, 1, error) &&
+                      device_.Write(&brightness, 1, error) &&
+                      Clear(error);
+            return opened_;
+        }
+
+        bool Draw(
+            const std::array<float, 128> &samples,
+            const GpioLedMatrixSettings &settings,
+            std::string *error)
+        {
+            std::array<bool, 25> pixels{};
+            if (settings.calibrationMode_)
+            {
+                // Asymmetric arrow: the point is logical top and the short
+                // tail is logical left, making rotation and mirroring obvious.
+                constexpr std::array<const char *, 5> pattern{
+                    ".#...", "###..", ".#...", "##...", ".#..."};
+                for (int y = 0; y < 5; ++y)
+                    for (int x = 0; x < 5; ++x)
+                        pixels[static_cast<size_t>(y * 5 + x)] = pattern[y][x] == '#';
+            }
+            else if (settings.mode_ == static_cast<int32_t>(GpioLedMatrixMode::Droplets))
+                DrawDroplets(samples, settings, &pixels);
+            else
+                DrawSpectrum(samples, settings, &pixels);
+
+            // The enclosure hides the four logical corners.
+            pixels[0] = pixels[4] = pixels[20] = pixels[24] = false;
+            std::array<uint16_t, 8> rows{};
+            for (int logicalY = 0; logicalY < 5; ++logicalY)
+            {
+                for (int logicalX = 0; logicalX < 5; ++logicalX)
+                {
+                    if (!pixels[static_cast<size_t>(logicalY * 5 + logicalX)])
+                        continue;
+                    int x = settings.mirror_ ? 4 - logicalX : logicalX;
+                    int y = logicalY;
+                    for (int turn = 0; turn < settings.rotation_; ++turn)
+                    {
+                        const int oldX = x;
+                        x = 4 - y;
+                        y = oldX;
+                    }
+                    x += settings.originX_;
+                    y += settings.originY_;
+                    if (x < 0 || x >= 8 || y < 0 || y >= 8)
+                        continue;
+                    // Adafruit's 8x8 backpack has its x wiring shifted by one.
+                    const int ramX = (x + 7) % 8;
+                    rows[static_cast<size_t>(y)] |= static_cast<uint16_t>(1u << ramX);
+                }
+            }
+            return Flush(rows, error);
+        }
+
+    private:
+        void DrawSpectrum(
+            const std::array<float, 128> &samples,
+            const GpioLedMatrixSettings &settings,
+            std::array<bool, 25> *pixels)
+        {
+            constexpr float pi = 3.14159265358979323846f;
+            constexpr std::array<float, 5> frequencies{
+                62.5f, 125.0f, 250.0f, 500.0f, 1000.0f};
+            constexpr float sampleRate = 4000.0f;
+            float windowSum = 0.0f;
+            for (size_t i = 0; i < samples.size(); ++i)
+                windowSum += 0.5f - 0.5f * std::cos(
+                    2.0f * pi * static_cast<float>(i) /
+                    static_cast<float>(samples.size() - 1));
+
+            for (size_t band = 0; band < frequencies.size(); ++band)
+            {
+                float real = 0.0f;
+                float imaginary = 0.0f;
+                for (size_t i = 0; i < samples.size(); ++i)
+                {
+                    const float window = 0.5f - 0.5f * std::cos(
+                        2.0f * pi * static_cast<float>(i) /
+                        static_cast<float>(samples.size() - 1));
+                    const float angle = 2.0f * pi * frequencies[band] *
+                                        static_cast<float>(i) / sampleRate;
+                    real += samples[i] * window * std::cos(angle);
+                    imaginary -= samples[i] * window * std::sin(angle);
+                }
+                const float amplitude = std::max(
+                    1.0e-6f,
+                    2.0f * std::sqrt(real * real + imaginary * imaginary) /
+                        std::max(windowSum, 1.0f));
+                const float db = 20.0f * std::log10(amplitude);
+                const float target = std::clamp(
+                    (db - settings.floorDb_) / -settings.floorDb_, 0.0f, 1.0f);
+                levels_[band] = std::max(target, levels_[band] * settings.decay_);
+                const int height = static_cast<int>(std::ceil(levels_[band] * 5.0f));
+                for (int y = 5 - height; y < 5; ++y)
+                    if (y >= 0)
+                        (*pixels)[static_cast<size_t>(y * 5 + static_cast<int>(band))] = true;
+            }
+        }
+
+        void DrawDroplets(
+            const std::array<float, 128> &samples,
+            const GpioLedMatrixSettings &settings,
+            std::array<bool, 25> *pixels)
+        {
+            float sumSquares = 0.0f;
+            float peak = 0.0f;
+            for (float sample : samples)
+            {
+                sumSquares += sample * sample;
+                peak = std::max(peak, std::abs(sample));
+            }
+            const float rms = std::sqrt(sumSquares / static_cast<float>(samples.size()));
+            // Peak gives a plucked bass note an immediate splash; RMS keeps
+            // the display coupled to the body of the held note.
+            const float level = std::max(rms * 1.45f, peak * 0.78f);
+            const float db = 20.0f * std::log10(std::max(level, 1.0e-6f));
+            const float targetEnergy = std::clamp(
+                (db - settings.floorDb_) / -settings.floorDb_, 0.0f, 1.0f);
+            const float frameSeconds = std::clamp(
+                static_cast<float>(settings.refreshIntervalMs_) / 1000.0f,
+                0.005f, 0.1f);
+
+            const float attackAlpha = 1.0f - std::exp(-frameSeconds / 0.008f);
+            const float releaseSeconds = 0.075f + settings.decay_ * 0.28f;
+            const float releaseAlpha = 1.0f - std::exp(-frameSeconds / releaseSeconds);
+            const float previousEnergy = smoothedDropletEnergy_;
+            const float envelopeAlpha =
+                targetEnergy > smoothedDropletEnergy_ ? attackAlpha : releaseAlpha;
+            smoothedDropletEnergy_ +=
+                (targetEnergy - smoothedDropletEnergy_) * envelopeAlpha;
+            const float slowAlpha = 1.0f - std::exp(-frameSeconds / 0.14f);
+            slowDropletEnergy_ +=
+                (smoothedDropletEnergy_ - slowDropletEnergy_) * slowAlpha;
+            const float onset = std::max(
+                0.0f, smoothedDropletEnergy_ - slowDropletEnergy_);
+            const float attack = std::max(
+                0.0f, smoothedDropletEnergy_ - previousEnergy);
+
+            const bool active = dropletWasActive_
+                                    ? smoothedDropletEnergy_ > 0.025f
+                                    : smoothedDropletEnergy_ > 0.055f;
+            const bool started = active && !dropletWasActive_;
+            dropletWasActive_ = active;
+            dropletCooldown_ = std::max(0.0f, dropletCooldown_ - frameSeconds);
+
+            if (active &&
+                (started || (attack > 0.055f && dropletCooldown_ <= 0.0f)))
+            {
+                // A note hit lands in the middle and lights a small immediate
+                // crown before the height field carries it out as a ripple.
+                AddDropletImpact(
+                    12,
+                    1.05f + smoothedDropletEnergy_ * 1.35f + onset * 0.55f,
+                    true);
+                dropletAccumulator_ = 0.35f;
+                dropletCooldown_ = 0.045f;
+            }
+
+            if (active)
+            {
+                // Keep adding smaller impacts while a note is held. Louder
+                // playing raises the ripple rate as well as the visible area.
+                dropletAccumulator_ += frameSeconds *
+                    (2.5f + smoothedDropletEnergy_ * 8.5f);
+                while (dropletAccumulator_ >= 1.0f)
+                {
+                    constexpr std::array<size_t, 5> innerCells{7, 11, 12, 13, 17};
+                    const uint32_t audioSeed = static_cast<uint32_t>(
+                        std::lround(
+                            std::abs(samples[dropletRandom_ % samples.size()]) *
+                            65535.0f));
+                    dropletRandom_ =
+                        dropletRandom_ * 1664525u + 1013904223u + audioSeed;
+                    AddDropletImpact(
+                        innerCells[dropletRandom_ % innerCells.size()],
+                        0.32f + smoothedDropletEnergy_ * 0.72f,
+                        false);
+                    dropletAccumulator_ -= 1.0f;
+                }
+            }
+            else
+            {
+                dropletAccumulator_ = 0.0f;
+            }
+
+            // The simulation is normalized to a 60 Hz frame. Substeps keep it
+            // stable if the I2C worker is temporarily delayed.
+            const float frameScale = frameSeconds * 60.0f;
+            const int substeps = std::clamp(
+                static_cast<int>(std::ceil(frameScale)), 1, 12);
+            const float dt = frameScale / static_cast<float>(substeps);
+            for (int step = 0; step < substeps; ++step)
+            {
+                std::array<float, 25> nextHeight{};
+                std::array<float, 25> nextVelocity{};
+                for (int y = 0; y < 5; ++y)
+                {
+                    for (int x = 0; x < 5; ++x)
+                    {
+                        const size_t cell = static_cast<size_t>(y * 5 + x);
+                        const float centre = dropletHeight_[cell];
+                        float laplacian = -4.0f * centre;
+                        if (x > 0) laplacian += dropletHeight_[cell - 1];
+                        if (x < 4) laplacian += dropletHeight_[cell + 1];
+                        if (y > 0) laplacian += dropletHeight_[cell - 5];
+                        if (y < 4) laplacian += dropletHeight_[cell + 5];
+                        const float velocity =
+                            (dropletVelocity_[cell] + laplacian * 0.28f * dt) *
+                            std::pow(0.78f + settings.decay_ * 0.18f, dt);
+                        nextVelocity[cell] = std::clamp(velocity, -4.0f, 4.0f);
+                        nextHeight[cell] = std::clamp(
+                            (centre + velocity * dt) *
+                                std::pow(0.94f + settings.decay_ * 0.05f, dt),
+                            -4.0f, 4.0f);
+                    }
+                }
+                nextHeight[0] = nextHeight[4] = nextHeight[20] = nextHeight[24] = 0.0f;
+                nextVelocity[0] = nextVelocity[4] = nextVelocity[20] = nextVelocity[24] = 0.0f;
+                dropletHeight_ = nextHeight;
+                dropletVelocity_ = nextVelocity;
+            }
+
+            // The matrix is monochrome, so use the number of lit surface
+            // points as its amplitude axis. Their positions still come from
+            // the wave field, preserving the moving splash/ripple shape.
+            constexpr std::array<size_t, 21> visibleCells{
+                1, 2, 3,
+                5, 6, 7, 8, 9,
+                10, 11, 12, 13, 14,
+                15, 16, 17, 18, 19,
+                21, 22, 23};
+            std::array<std::pair<float, size_t>, visibleCells.size()> surface{};
+            for (size_t index = 0; index < visibleCells.size(); ++index)
+            {
+                const size_t cell = visibleCells[index];
+                surface[index] = {std::abs(dropletHeight_[cell]), cell};
+            }
+            std::stable_sort(
+                surface.begin(), surface.end(),
+                [](const auto &left, const auto &right)
+                { return left.first > right.first; });
+            const int visibleCount = smoothedDropletEnergy_ < 0.008f
+                                         ? 0
+                                         : std::clamp(
+                                               static_cast<int>(std::ceil(
+                                                   std::pow(
+                                                       smoothedDropletEnergy_, 0.78f) *
+                                                   14.0f)),
+                                               1, 14);
+            for (int index = 0; index < visibleCount; ++index)
+                (*pixels)[surface[static_cast<size_t>(index)].second] = true;
+        }
+
+        void AddDropletImpact(size_t cell, float strength, bool splash)
+        {
+            dropletHeight_[cell] += strength * 1.12f;
+            dropletVelocity_[cell] += strength * 0.82f;
+            if (!splash)
+                return;
+
+            const int x = static_cast<int>(cell % 5);
+            const int y = static_cast<int>(cell / 5);
+            for (int offsetY = -1; offsetY <= 1; ++offsetY)
+            {
+                for (int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    if (offsetX == 0 && offsetY == 0)
+                        continue;
+                    const int neighbourX = x + offsetX;
+                    const int neighbourY = y + offsetY;
+                    if (neighbourX < 0 || neighbourX >= 5 ||
+                        neighbourY < 0 || neighbourY >= 5)
+                        continue;
+                    const size_t neighbour = static_cast<size_t>(
+                        neighbourY * 5 + neighbourX);
+                    const bool cardinal = offsetX == 0 || offsetY == 0;
+                    dropletHeight_[neighbour] +=
+                        strength * (cardinal ? 0.38f : 0.14f);
+                    dropletVelocity_[neighbour] +=
+                        strength * (cardinal ? 0.16f : 0.06f);
+                }
+            }
+        }
+
+        bool Clear(std::string *error)
+        {
+            std::array<uint16_t, 8> rows{};
+            return Flush(rows, error);
+        }
+
+        bool Flush(const std::array<uint16_t, 8> &rows, std::string *error)
+        {
+            uint8_t data[17]{};
+            data[0] = 0x00;
+            for (size_t row = 0; row < rows.size(); ++row)
+            {
+                data[1 + row * 2] = static_cast<uint8_t>(rows[row] & 0xFF);
+                data[2 + row * 2] = static_cast<uint8_t>(rows[row] >> 8);
+            }
+            return device_.Write(data, sizeof(data), error);
+        }
+
+        I2cDevice device_;
+        std::array<float, 5> levels_{};
+        std::array<float, 25> dropletHeight_{};
+        std::array<float, 25> dropletVelocity_{};
+        float smoothedDropletEnergy_ = 0.0f;
+        float slowDropletEnergy_ = 0.0f;
+        float dropletAccumulator_ = 0.0f;
+        float dropletCooldown_ = 0.0f;
+        bool dropletWasActive_ = false;
+        uint32_t dropletRandom_ = 0x50495045u;
+        bool opened_ = false;
+    };
 #else
     class Ssd1306Display {};
+    class Ht16k33Matrix {};
 #endif
 
     struct RuntimeInput
@@ -801,11 +1477,17 @@ namespace
 #if defined(__linux__)
         GpioLineHandle lineHandle;
         SeesawEncoder encoder;
+        SeesawNavigationEncoder navigation;
 #endif
         bool initialized = false;
         bool available = true;
         bool stableDigitalValue = false;
         bool candidateDigitalValue = false;
+        uint32_t stableNavigationButtons = 0;
+        uint32_t candidateNavigationButtons = 0;
+        uint32_t navigationActivityPending = 0;
+        std::array<std::chrono::steady_clock::time_point, 5> navigationCandidateSince{};
+        bool encoderButtonActivityPending = false;
         bool emittedPressedInitialized = false;
         bool lastEmittedPressed = false;
         float filteredValue = 0.0f;
@@ -851,8 +1533,7 @@ namespace
         {
             std::lock_guard lock(displayMutex_);
             displayMessage_ = message;
-            displayOverlayActive_ = true;
-            displayOverlayIsDashboard_ = false;
+            displayOverlayType_ = 1;
             displayMessageSequence_++;
         }
 
@@ -865,8 +1546,7 @@ namespace
         {
             std::lock_guard lock(displayMutex_);
             displayMessage_ = {};
-            displayOverlayActive_ = false;
-            displayOverlayIsDashboard_ = false;
+            displayOverlayType_ = 0;
             displayMessageSequence_++;
         }
 
@@ -885,8 +1565,15 @@ namespace
         {
             std::lock_guard lock(displayMutex_);
             displayDashboard_ = dashboard;
-            displayOverlayActive_ = true;
-            displayOverlayIsDashboard_ = true;
+            displayOverlayType_ = 2;
+            displayMessageSequence_++;
+        }
+
+        void ShowTemporaryMenu(const GpioDisplayMenu &menu) override
+        {
+            std::lock_guard lock(displayMutex_);
+            displayMenu_ = menu;
+            displayOverlayType_ = 3;
             displayMessageSequence_++;
         }
 
@@ -916,17 +1603,30 @@ namespace
             return displayMode_;
         }
 
+        void SetDisplayMode(GpioDisplayMode mode) override
+        {
+            if (mode < GpioDisplayMode::Controls || mode > GpioDisplayMode::Blank)
+                mode = GpioDisplayMode::Controls;
+            {
+                std::lock_guard lock(displayMutex_);
+                displayMode_ = mode;
+            }
+            if (mode == GpioDisplayMode::Tuner)
+                tunerResetRequested_.store(true);
+            redrawRequested_.store(true);
+        }
+
         void Configure(const GpioSettings &settings) override
         {
             GpioManager::Validate(settings);
             Close();
             {
                 std::lock_guard lock(displayMutex_);
-                displayMode_ = GpioDisplayMode::Controls;
+                displayMode_ = static_cast<GpioDisplayMode>(settings.display_.passiveMode_);
                 waveformModeEnabled_ = settings.display_.waveformEnabled_;
                 displayMessage_ = {};
-                displayOverlayActive_ = false;
-                displayOverlayIsDashboard_ = false;
+                displayMenu_ = {};
+                displayOverlayType_ = 0;
                 displayMessageSequence_ = 0;
             }
             tunerResetRequested_.store(true);
@@ -947,11 +1647,19 @@ namespace
             {
                 return;
             }
-            thread_ = std::make_unique<std::jthread>(
+            inputThread_ = std::make_unique<std::jthread>(
                 [this, settings](std::stop_token stopToken)
                 {
-                    Run(stopToken, settings);
+                    RunInputs(stopToken, settings);
                 });
+            if (settings.display_.enabled_ || settings.ledMatrix_.enabled_)
+            {
+                displayThread_ = std::make_unique<std::jthread>(
+                    [this, settings](std::stop_token stopToken)
+                    {
+                        RunDisplays(stopToken, settings);
+                    });
+            }
         }
 
         void Refresh() override
@@ -967,11 +1675,12 @@ namespace
 
         void Close() override
         {
-            if (thread_)
-            {
-                thread_->request_stop();
-                thread_.reset();
-            }
+            if (inputThread_)
+                inputThread_->request_stop();
+            if (displayThread_)
+                displayThread_->request_stop();
+            inputThread_.reset();
+            displayThread_.reset();
             refreshRequested_.store(false);
             redrawRequested_.store(false);
         }
@@ -1006,6 +1715,30 @@ namespace
                 }
                 callback(event);
             }
+        }
+
+        void EmitNavigationButton(
+            RuntimeInput &runtime,
+            GpioNavigationButton button,
+            bool pressed,
+            bool initial)
+        {
+            EventCallback callback;
+            {
+                std::lock_guard lock(callbackMutex_);
+                callback = eventCallback_;
+            }
+            if (!callback)
+                return;
+            GpioInputEvent event;
+            event.inputId = runtime.configuration.id_;
+            event.value = pressed ? 1.0f : 0.0f;
+            event.pressed = pressed;
+            event.risingEdge = pressed && !initial;
+            event.initial = initial;
+            event.eventType = GpioInputEventType::EncoderButton;
+            event.navigationButton = button;
+            callback(event);
         }
 
         void UpdateStatus(RuntimeInput &runtime, bool notify)
@@ -1167,8 +1900,9 @@ namespace
             runtime.nextEncoderRead = now + std::chrono::milliseconds(runtime.configuration.encoderPollIntervalMs_);
             int32_t delta = 0;
             bool pressed = false;
+            bool buttonActivity = false;
             std::string error;
-            if (!runtime.encoder.Read(&delta, &pressed, &error))
+            if (!runtime.encoder.Read(&delta, &pressed, &buttonActivity, &error))
             {
                 SetError(runtime, error);
                 return;
@@ -1179,6 +1913,7 @@ namespace
                 runtime.stableDigitalValue = pressed;
                 runtime.candidateDigitalValue = pressed;
                 runtime.candidateSince = now;
+                runtime.encoderButtonActivityPending = false;
                 runtime.status.connected_ = true;
                 runtime.status.error_.clear();
                 runtime.status.encoderPosition_ = 0;
@@ -1188,6 +1923,9 @@ namespace
                 EmitEvent(runtime, true, GpioInputEventType::EncoderButton);
                 return;
             }
+
+            if (buttonActivity)
+                runtime.encoderButtonActivityPending = true;
 
             if (delta != 0)
             {
@@ -1219,6 +1957,7 @@ namespace
                 runtime.status.error_.clear();
                 UpdateStatus(runtime, true);
                 EmitEvent(runtime, false, GpioInputEventType::EncoderButton);
+                runtime.encoderButtonActivityPending = false;
             }
             else if (!runtime.status.connected_)
             {
@@ -1226,10 +1965,152 @@ namespace
                 runtime.status.error_.clear();
                 UpdateStatus(runtime, true);
             }
+
+            // If both edges occurred between samples, the GPIO interrupt flag
+            // is the only surviving evidence. Emit one complete click so quick
+            // taps cannot disappear behind OLED I2C traffic.
+            if (runtime.encoderButtonActivityPending &&
+                !pressed &&
+                !runtime.candidateDigitalValue &&
+                !runtime.stableDigitalValue)
+            {
+                runtime.encoderButtonActivityPending = false;
+                runtime.status.buttonPressed_ = true;
+                runtime.status.value_ = 1.0f;
+                UpdateStatus(runtime, true);
+                EmitEvent(runtime, false, GpioInputEventType::EncoderButton);
+                runtime.status.buttonPressed_ = false;
+                runtime.status.value_ = 0.0f;
+                UpdateStatus(runtime, true);
+                EmitEvent(runtime, false, GpioInputEventType::EncoderButton);
+            }
             if (refresh)
                 EmitEvent(runtime, true, GpioInputEventType::EncoderButton);
 #else
             (void)runtime; (void)now; (void)refresh;
+#endif
+        }
+
+        void ProcessNavigation(
+            RuntimeInput &runtime,
+            std::chrono::steady_clock::time_point now,
+            bool refresh)
+        {
+#if defined(__linux__)
+            if (!refresh && now < runtime.nextEncoderRead)
+                return;
+            runtime.nextEncoderRead = now +
+                                      std::chrono::milliseconds(runtime.configuration.encoderPollIntervalMs_);
+            int32_t delta = 0;
+            uint32_t buttons = 0;
+            uint32_t buttonActivity = 0;
+            std::string error;
+            if (!runtime.navigation.Read(&delta, &buttons, &buttonActivity, &error))
+            {
+                SetError(runtime, error);
+                return;
+            }
+            if (!runtime.initialized)
+            {
+                runtime.initialized = true;
+                runtime.stableNavigationButtons = buttons;
+                runtime.candidateNavigationButtons = buttons;
+                runtime.navigationActivityPending = 0;
+                runtime.navigationCandidateSince.fill(now);
+                runtime.status.connected_ = true;
+                runtime.status.error_.clear();
+                runtime.status.navigationButtons_ = buttons;
+                runtime.status.buttonPressed_ = buttons != 0;
+                UpdateStatus(runtime, true);
+                return;
+            }
+
+            runtime.navigationActivityPending |= buttonActivity;
+
+            if (delta != 0)
+            {
+                if (runtime.configuration.encoderReversed_)
+                    delta = -delta;
+                const int32_t unitDelta = delta > 0 ? 1 : -1;
+                const int32_t count = std::abs(delta);
+                runtime.status.connected_ = true;
+                runtime.status.error_.clear();
+                UpdateStatus(runtime, true);
+                for (int32_t i = 0; i < count; ++i)
+                    EmitEvent(runtime, false, GpioInputEventType::EncoderTurn, unitDelta);
+            }
+
+            std::array<std::pair<GpioNavigationButton, bool>, 5> events{};
+            size_t eventCount = 0;
+            bool stableStateChanged = false;
+            for (int bit = 0; bit < 5; ++bit)
+            {
+                const uint32_t mask = 1u << bit;
+                const bool sampled = (buttons & mask) != 0;
+                const bool candidate = (runtime.candidateNavigationButtons & mask) != 0;
+                const bool stable = (runtime.stableNavigationButtons & mask) != 0;
+                if (sampled != candidate)
+                {
+                    if (sampled)
+                        runtime.candidateNavigationButtons |= mask;
+                    else
+                        runtime.candidateNavigationButtons &= ~mask;
+                    runtime.navigationCandidateSince[static_cast<size_t>(bit)] = now;
+                }
+                else if (candidate != stable &&
+                         now - runtime.navigationCandidateSince[static_cast<size_t>(bit)] >=
+                             std::chrono::milliseconds(runtime.configuration.debounceMs_))
+                {
+                    if (candidate)
+                        runtime.stableNavigationButtons |= mask;
+                    else
+                        runtime.stableNavigationButtons &= ~mask;
+                    runtime.navigationActivityPending &= ~mask;
+                    stableStateChanged = true;
+                    events[eventCount++] = {
+                        static_cast<GpioNavigationButton>(bit + 1), candidate};
+                }
+            }
+
+            if (stableStateChanged)
+            {
+                runtime.status.navigationButtons_ = runtime.stableNavigationButtons;
+                runtime.status.buttonPressed_ = runtime.stableNavigationButtons != 0;
+                runtime.status.value_ = runtime.status.buttonPressed_ ? 1.0f : 0.0f;
+                runtime.status.connected_ = true;
+                runtime.status.error_.clear();
+                UpdateStatus(runtime, true);
+                for (size_t index = 0; index < eventCount; ++index)
+                    EmitNavigationButton(
+                        runtime, events[index].first, events[index].second, false);
+            }
+            else if (!runtime.status.connected_)
+            {
+                runtime.status.connected_ = true;
+                runtime.status.error_.clear();
+                UpdateStatus(runtime, true);
+            }
+
+            // INTFLAG preserves a press that began and ended between polls.
+            // Navigation only acts on the rising edge, but emit the matching
+            // release too so event consumers always see a complete gesture.
+            for (int bit = 0; bit < 5; ++bit)
+            {
+                const uint32_t mask = 1u << bit;
+                if ((runtime.navigationActivityPending & mask) == 0 ||
+                    (buttons & mask) != 0 ||
+                    (runtime.candidateNavigationButtons & mask) != 0 ||
+                    (runtime.stableNavigationButtons & mask) != 0)
+                    continue;
+                runtime.navigationActivityPending &= ~mask;
+                const auto button = static_cast<GpioNavigationButton>(bit + 1);
+                EmitNavigationButton(runtime, button, true, false);
+                EmitNavigationButton(runtime, button, false, false);
+            }
+#else
+            (void)runtime;
+            (void)now;
+            (void)refresh;
 #endif
         }
 
@@ -1242,17 +2123,17 @@ namespace
 #if defined(__linux__)
             GpioDisplayMessage message;
             GpioDisplayDashboard dashboard;
+            GpioDisplayMenu menu;
             GpioDisplayMode mode;
-            bool overlayActive;
-            bool overlayIsDashboard;
+            int32_t overlayType;
             uint64_t sequence;
             {
                 std::lock_guard lock(displayMutex_);
                 message = displayMessage_;
                 dashboard = displayDashboard_;
+                menu = displayMenu_;
                 mode = displayMode_;
-                overlayActive = displayOverlayActive_;
-                overlayIsDashboard = displayOverlayIsDashboard_;
+                overlayType = displayOverlayType_;
                 sequence = displayMessageSequence_;
             }
             if (sequence != *seenSequence)
@@ -1264,10 +2145,12 @@ namespace
             if (!force && now < *nextDraw) return;
             *nextDraw = now + std::chrono::milliseconds(settings.refreshIntervalMs_);
             std::string error;
-            if (overlayActive && now < *overlayUntil)
+            if (overlayType != 0 && now < *overlayUntil)
             {
-                if (overlayIsDashboard)
+                if (overlayType == 2)
                     display.DrawDashboard(dashboard, &error);
+                else if (overlayType == 3)
+                    display.DrawMenu(menu, &error);
                 else
                     display.DrawMessage(message, &error);
                 return;
@@ -1334,13 +2217,18 @@ namespace
                 display.DrawTuner(tunerAnalyzer_.Frame(), &error);
                 return;
             }
+            if (mode == GpioDisplayMode::Blank)
+            {
+                display.DrawBlank(&error);
+                return;
+            }
             display.DrawIdle(&error);
 #else
             (void)display; (void)settings; (void)now; (void)force; (void)nextDraw; (void)seenSequence; (void)overlayUntil;
 #endif
         }
 
-        void Run(std::stop_token stopToken, const GpioSettings &settings)
+        void RunInputs(std::stop_token stopToken, const GpioSettings &settings)
         {
             std::vector<std::unique_ptr<RuntimeInput>> runtimes;
             for (const auto &input : settings.inputs_)
@@ -1350,7 +2238,23 @@ namespace
                     continue;
                 }
                 auto runtime = std::make_unique<RuntimeInput>(input);
-                if (input.inputType() == GpioInputType::Encoder)
+                if (input.inputType() == GpioInputType::Navigation)
+                {
+#if defined(__linux__)
+                    std::string error;
+                    if (!runtime->navigation.Open(input, &error))
+                    {
+                        runtime->available = false;
+                        runtime->status.error_ = error;
+                        UpdateStatus(*runtime, true);
+                    }
+#else
+                    runtime->available = false;
+                    runtime->status.error_ = "I2C navigation is only supported on Linux.";
+                    UpdateStatus(*runtime, true);
+#endif
+                }
+                else if (input.inputType() == GpioInputType::Encoder)
                 {
 #if defined(__linux__)
                     std::string error;
@@ -1385,6 +2289,41 @@ namespace
                 runtimes.push_back(std::move(runtime));
             }
 
+            while (!stopToken.stop_requested())
+            {
+                bool refresh = refreshRequested_.exchange(false);
+                if (refresh)
+                    redrawRequested_.store(true);
+                auto now = std::chrono::steady_clock::now();
+                for (auto &runtime : runtimes)
+                {
+                    if (!runtime->available)
+                    {
+                        continue;
+                    }
+                    if (runtime->configuration.inputType() == GpioInputType::Analog)
+                    {
+                        ProcessAnalog(*runtime, now, refresh);
+                    }
+                    else if (runtime->configuration.inputType() == GpioInputType::Navigation)
+                    {
+                        ProcessNavigation(*runtime, now, refresh);
+                    }
+                    else if (runtime->configuration.inputType() == GpioInputType::Encoder)
+                    {
+                        ProcessEncoder(*runtime, now, refresh);
+                    }
+                    else
+                    {
+                        ProcessDigital(*runtime, now, refresh);
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+
+        void RunDisplays(std::stop_token stopToken, const GpioSettings &settings)
+        {
 #if defined(__linux__)
             Ssd1306Display display;
             bool displayAvailable = false;
@@ -1398,41 +2337,49 @@ namespace
             auto nextDisplayDraw = std::chrono::steady_clock::time_point{};
             auto overlayUntil = std::chrono::steady_clock::time_point{};
             uint64_t seenDisplaySequence = 0;
-#endif
+
+            Ht16k33Matrix ledMatrix;
+            bool ledMatrixAvailable = false;
+            if (settings.ledMatrix_.enabled_)
+            {
+                std::string error;
+                ledMatrixAvailable = ledMatrix.Open(settings.ledMatrix_, &error);
+                if (!ledMatrixAvailable)
+                    Lv2Log::warning("Unable to open GPIO LED matrix: %s", error.c_str());
+            }
+            auto nextLedMatrixDraw = std::chrono::steady_clock::time_point{};
 
             while (!stopToken.stop_requested())
             {
-                // refresh re-reads and re-emits every input; redraw only wakes
-                // the display. Refresh implies redraw, not the other way round.
-                bool refresh = refreshRequested_.exchange(false);
-                bool redraw = redrawRequested_.exchange(false) || refresh;
-                auto now = std::chrono::steady_clock::now();
-                for (auto &runtime : runtimes)
+                const bool redraw = redrawRequested_.exchange(false);
+                const auto now = std::chrono::steady_clock::now();
+                if (displayAvailable)
+                    ProcessDisplay(
+                        display, settings.display_, now, redraw,
+                        &nextDisplayDraw, &seenDisplaySequence, &overlayUntil);
+                if (ledMatrixAvailable && now >= nextLedMatrixDraw)
                 {
-                    if (!runtime->available)
+                    nextLedMatrixDraw = now +
+                        std::chrono::milliseconds(settings.ledMatrix_.refreshIntervalMs_);
+                    std::array<float, 128> samples{};
+                    WaveformProvider provider;
                     {
-                        continue;
+                        std::lock_guard lock(callbackMutex_);
+                        provider = waveformProvider_;
                     }
-                    if (runtime->configuration.inputType() == GpioInputType::Analog)
+                    if (settings.ledMatrix_.calibrationMode_ ||
+                        (provider && provider(true, &samples)))
                     {
-                        ProcessAnalog(*runtime, now, refresh);
-                    }
-                    else if (runtime->configuration.inputType() == GpioInputType::Encoder)
-                    {
-                        ProcessEncoder(*runtime, now, refresh);
-                    }
-                    else
-                    {
-                        ProcessDigital(*runtime, now, refresh);
+                        std::string error;
+                        ledMatrix.Draw(samples, settings.ledMatrix_, &error);
                     }
                 }
-#if defined(__linux__)
-                if (displayAvailable)
-                    ProcessDisplay(display, settings.display_, now, redraw, &nextDisplayDraw,
-                                   &seenDisplaySequence, &overlayUntil);
-#endif
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
+#else
+            (void)stopToken;
+            (void)settings;
+#endif
         }
 
         mutable std::mutex statusMutex_;
@@ -1447,17 +2394,18 @@ namespace
         mutable std::mutex displayMutex_;
         GpioDisplayMessage displayMessage_;
         GpioDisplayDashboard displayDashboard_;
+        GpioDisplayMenu displayMenu_;
         GpioDisplayMode displayMode_ = GpioDisplayMode::Controls;
         bool waveformModeEnabled_ = true;
-        bool displayOverlayActive_ = false;
-        bool displayOverlayIsDashboard_ = false;
+        int32_t displayOverlayType_ = 0;
         uint64_t displayMessageSequence_ = 0;
         GpioTunerAnalyzer tunerAnalyzer_;
         uint64_t tunerReadIndex_ = std::numeric_limits<uint64_t>::max();
         uint32_t tunerSampleRate_ = 0;
         std::atomic<bool> tunerResetRequested_ = true;
 
-        std::unique_ptr<std::jthread> thread_;
+        std::unique_ptr<std::jthread> inputThread_;
+        std::unique_ptr<std::jthread> displayThread_;
         std::atomic<bool> refreshRequested_ = false;
         std::atomic<bool> redrawRequested_ = false;
     };
@@ -1465,39 +2413,52 @@ namespace
 
 bool GpioSettings::EnsureStandardEncoderRoles()
 {
-    if (encoderRolesConfigured_)
+    constexpr int32_t currentRoleVersion = 4;
+    if (encoderRoleVersion_ >= currentRoleVersion)
         return false;
-    for (const auto &input : inputs_)
+
+    if (encoderRoleVersion_ < 2)
     {
-        if (input.encoderRole() != GpioEncoderRole::None)
+        std::vector<GpioInputConfiguration *> encoders;
+        for (auto &input : inputs_)
         {
-            encoderRolesConfigured_ = true;
-            return true;
+            if (input.enabled_ && input.inputType() == GpioInputType::Encoder)
+                encoders.push_back(&input);
         }
+        if (encoders.size() < 4)
+            return false;
+
+        std::stable_sort(
+            encoders.begin(), encoders.end(),
+            [](const GpioInputConfiguration *left, const GpioInputConfiguration *right)
+            {
+                if (left->i2cDevice_ != right->i2cDevice_)
+                    return left->i2cDevice_ < right->i2cDevice_;
+                return left->i2cAddress_ < right->i2cAddress_;
+            });
+        for (auto *encoder : encoders)
+            encoder->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::None);
+        encoders[0]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter1);
+        encoders[1]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter2);
+        encoders[2]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter3);
+        encoders[3]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter4);
+        encoderRolesConfigured_ = true;
     }
 
-    std::vector<GpioInputConfiguration *> encoders;
+    // Version 4 runs the control boards as quickly as the shared worker and
+    // documented 400 kHz bus allow, while preserving deliberately assigned
+    // left-to-right roles from the version 2 workflow.
     for (auto &input : inputs_)
     {
-        if (input.enabled_ && input.inputType() == GpioInputType::Encoder)
-            encoders.push_back(&input);
-    }
-    if (encoders.size() < 4)
-        return false;
-
-    std::stable_sort(
-        encoders.begin(), encoders.end(),
-        [](const GpioInputConfiguration *left, const GpioInputConfiguration *right)
+        if (input.enabled_ &&
+            (input.inputType() == GpioInputType::Encoder ||
+             input.inputType() == GpioInputType::Navigation))
         {
-            if (left->i2cDevice_ != right->i2cDevice_)
-                return left->i2cDevice_ < right->i2cDevice_;
-            return left->i2cAddress_ < right->i2cAddress_;
-        });
-    encoders[0]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::PresetBrowser);
-    encoders[1]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::ParameterScroll);
-    encoders[2]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter1);
-    encoders[3]->encoderRole_ = static_cast<int32_t>(GpioEncoderRole::Parameter2);
-    encoderRolesConfigured_ = true;
+            input.encoderPollIntervalMs_ = 1;
+            input.debounceMs_ = std::min(input.debounceMs_, 10);
+        }
+    }
+    encoderRoleVersion_ = currentRoleVersion;
     return true;
 }
 
@@ -1522,9 +2483,9 @@ void GpioManager::Validate(const GpioSettings &settings)
             throw std::invalid_argument("GPIO input ids must be unique.");
         }
         if (input.inputType_ < static_cast<int32_t>(GpioInputType::Momentary) ||
-            input.inputType_ > static_cast<int32_t>(GpioInputType::Encoder) ||
+            input.inputType_ > static_cast<int32_t>(GpioInputType::Navigation) ||
             input.encoderRole_ < static_cast<int32_t>(GpioEncoderRole::None) ||
-            input.encoderRole_ > static_cast<int32_t>(GpioEncoderRole::Parameter2) ||
+            input.encoderRole_ > static_cast<int32_t>(GpioEncoderRole::Parameter4) ||
             (input.encoderRole() != GpioEncoderRole::None && input.inputType() != GpioInputType::Encoder))
         {
             throw std::invalid_argument("Invalid GPIO input type.");
@@ -1533,17 +2494,19 @@ void GpioManager::Validate(const GpioSettings &settings)
         {
             continue;
         }
-        if (input.inputType() == GpioInputType::Encoder)
+        if (input.inputType() == GpioInputType::Encoder ||
+            input.inputType() == GpioInputType::Navigation)
         {
             if (!IsI2cDevicePath(input.i2cDevice_) || input.i2cAddress_ < 0x08 || input.i2cAddress_ > 0x77 ||
-                input.encoderPollIntervalMs_ < 5 || input.encoderPollIntervalMs_ > 1000 ||
+                input.encoderPollIntervalMs_ < 1 || input.encoderPollIntervalMs_ > 1000 ||
                 input.debounceMs_ < 0 || input.debounceMs_ > 2000)
             {
                 throw std::invalid_argument("Invalid I2C encoder settings.");
             }
             if (!i2cAddresses.insert({input.i2cDevice_, input.i2cAddress_}).second)
                 throw std::invalid_argument("Two enabled I2C devices cannot use the same bus address.");
-            if (input.encoderRole() != GpioEncoderRole::None &&
+            if (input.inputType() == GpioInputType::Encoder &&
+                input.encoderRole() != GpioEncoderRole::None &&
                 !encoderRoles.insert(input.encoderRole_).second)
                 throw std::invalid_argument("Each standard encoder role can be assigned only once.");
         }
@@ -1593,12 +2556,37 @@ void GpioManager::Validate(const GpioSettings &settings)
         if (!IsI2cDevicePath(display.i2cDevice_) || display.i2cAddress_ < 0x08 || display.i2cAddress_ > 0x77 ||
             display.overlayTimeoutMs_ < 250 || display.overlayTimeoutMs_ > 60000 ||
             display.refreshIntervalMs_ < 50 || display.refreshIntervalMs_ > 5000 ||
-            display.contrast_ < 0 || display.contrast_ > 255)
+            display.contrast_ < 0 || display.contrast_ > 255 ||
+            display.passiveMode_ < static_cast<int32_t>(GpioDisplayMode::Controls) ||
+            display.passiveMode_ > static_cast<int32_t>(GpioDisplayMode::Blank))
         {
             throw std::invalid_argument("Invalid SSD1306 display settings.");
         }
         if (!i2cAddresses.insert({display.i2cDevice_, display.i2cAddress_}).second)
-            throw std::invalid_argument("The display and an encoder cannot use the same I2C bus address.");
+            throw std::invalid_argument("Enabled I2C devices cannot use the same bus address.");
+    }
+
+    const auto &matrix = settings.ledMatrix_;
+    if (matrix.enabled_)
+    {
+        if (!IsI2cDevicePath(matrix.i2cDevice_) ||
+            matrix.i2cAddress_ < 0x08 || matrix.i2cAddress_ > 0x77 ||
+            matrix.brightness_ < 0 || matrix.brightness_ > 15 ||
+            matrix.refreshIntervalMs_ < 10 || matrix.refreshIntervalMs_ > 1000 ||
+            matrix.mode_ < static_cast<int32_t>(GpioLedMatrixMode::Spectrum) ||
+            matrix.mode_ > static_cast<int32_t>(GpioLedMatrixMode::Droplets) ||
+            !IsFiniteGpioValue(matrix.floorDb_) ||
+            matrix.floorDb_ < -96.0f || matrix.floorDb_ > -6.0f ||
+            !IsFiniteGpioValue(matrix.decay_) ||
+            matrix.decay_ < 0.0f || matrix.decay_ >= 1.0f ||
+            matrix.originX_ < 0 || matrix.originX_ > 3 ||
+            matrix.originY_ < 0 || matrix.originY_ > 3 ||
+            matrix.rotation_ < 0 || matrix.rotation_ > 3)
+        {
+            throw std::invalid_argument("Invalid HT16K33 LED matrix settings.");
+        }
+        if (!i2cAddresses.insert({matrix.i2cDevice_, matrix.i2cAddress_}).second)
+            throw std::invalid_argument("Enabled I2C devices cannot use the same bus address.");
     }
 }
 

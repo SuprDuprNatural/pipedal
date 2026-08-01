@@ -159,15 +159,32 @@ namespace pipedal
         GpioSettings gpioSettings;
         std::unique_ptr<GpioManager> gpioManager;
         int64_t gpioPendingPresetId = -1;
-        // The two parameters currently on the OLED. Written from the Post
-        // dispatch thread and read whenever a control changes, so both go
+        enum class GpioNavigationLayer : int32_t
+        {
+            Settings = 0,
+            Presets = 1,
+            Effects = 2,
+            Parameters = 3
+        };
+        GpioNavigationLayer gpioNavigationLayer = GpioNavigationLayer::Parameters;
+        int32_t gpioSettingsMenuIndex = 0;
+        int64_t gpioSelectedEffectId = -1;
+        // The four parameters currently on the OLED. Written from the Post
+        // dispatch thread and read whenever a control changes, so all go
         // through the model mutex.
-        std::array<GpioParameter, 2> gpioShownParameters;
+        std::array<GpioParameter, 4> gpioShownParameters;
         void HandleGpioInputEvent(const GpioInputEvent &event);
         bool HandleGpioRoleEvent(const GpioInputEvent &event, GpioEncoderRole role);
-        // Every parameter the web interface would show a control for, in chain
-        // order. This is what the parameter encoder scrolls through.
-        std::vector<GpioParameter> GetGpioParameters();
+        void HandleGpioNavigationEvent(const GpioInputEvent &event);
+        void MoveGpioNavigationSelection(int32_t delta);
+        void AcceptGpioNavigationSelection();
+        void AdvanceGpioNavigationLayer();
+        void BackGpioNavigationLayer();
+        void ShowGpioNavigationLayer();
+        // Every visible parameter in chain order, or one effect when an id is supplied.
+        std::vector<GpioParameter> GetGpioParameters(int64_t effectId = -1);
+        std::vector<std::pair<int64_t, std::string>> GetGpioEffects();
+        void EnsureGpioSelectedEffect();
         size_t GetGpioScrollIndex(const std::vector<GpioParameter> &parameters);
         void SetGpioScrollIndex(const std::vector<GpioParameter> &parameters, size_t index);
         // A pedalboard supplied by a client carries no scroll position, so keep

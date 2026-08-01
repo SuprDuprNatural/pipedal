@@ -6,9 +6,16 @@ find_program(NPM_COMMAND npm)
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     set(BUILD_REACT "echo")
     set(BUILD_REACT_ARGS Skipping react debug build)
-else()
-    set(BUILD_REACT npm)
+elseif(NPM_COMMAND)
+    set(BUILD_REACT ${NPM_COMMAND})
     set(BUILD_REACT_ARGS run build)
+elseif(EXISTS "${PROJECT_SOURCE_DIR}/vite/dist/index.html")
+    # Deployment hosts do not need Node when a verified frontend bundle was
+    # built elsewhere and staged in vite/dist.
+    set(BUILD_REACT ${CMAKE_COMMAND})
+    set(BUILD_REACT_ARGS -E touch "${PROJECT_SOURCE_DIR}/vite/dist/index.html")
+else()
+    message(FATAL_ERROR "npm was not found and vite/dist/index.html is missing")
 endif()
 
 set(BUILD_DIRECTORY ${PROJECT_SOURCE_DIR}/vite/dist)
