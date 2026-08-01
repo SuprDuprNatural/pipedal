@@ -356,7 +356,14 @@ namespace
             return true;
         }
 
-        bool ReadRegister(uint8_t module, uint8_t function, uint8_t *data, size_t size, std::string *error)
+        bool ReadRegister(
+            uint8_t module,
+            uint8_t function,
+            uint8_t *data,
+            size_t size,
+            std::string *error,
+            std::chrono::microseconds responseDelay =
+                std::chrono::microseconds(300))
         {
             uint8_t request[2]{module, function};
             // A seesaw can briefly stretch or NACK a register transaction while
@@ -367,7 +374,7 @@ namespace
                 if (::write(fd_, request, sizeof(request)) ==
                     static_cast<ssize_t>(sizeof(request)))
                 {
-                    std::this_thread::sleep_for(std::chrono::microseconds(300));
+                    std::this_thread::sleep_for(responseDelay);
                     if (::read(fd_, data, size) == static_cast<ssize_t>(size))
                         return true;
                 }
@@ -526,23 +533,25 @@ namespace
             uint8_t high[6]{0x01, 0x05,
                             static_cast<uint8_t>(buttonMask >> 24), static_cast<uint8_t>(buttonMask >> 16),
                             static_cast<uint8_t>(buttonMask >> 8), static_cast<uint8_t>(buttonMask)};
-            uint8_t interrupts[6]{0x01, 0x08,
-                                  static_cast<uint8_t>(buttonMask >> 24), static_cast<uint8_t>(buttonMask >> 16),
-                                  static_cast<uint8_t>(buttonMask >> 8), static_cast<uint8_t>(buttonMask)};
             return device_.Write(direction, sizeof(direction), error) &&
                    device_.Write(pull, sizeof(pull), error) &&
-                   device_.Write(high, sizeof(high), error) &&
-                   device_.Write(interrupts, sizeof(interrupts), error);
+                   device_.Write(high, sizeof(high), error);
         }
 
         bool Read(
             int32_t *delta,
             uint32_t *pressedButtons,
-            uint32_t *buttonActivity,
             std::string *error)
         {
             uint8_t gpioBytes[4]{};
-            if (!device_.ReadRegister(0x01, 0x04, gpioBytes, sizeof(gpioBytes), error))
+            // The ATtiny816 ANO firmware needs the conservative response time
+            // used by Adafruit's Linux/CircuitPython driver. With the generic
+            // 300 us fast path it can occasionally return the preceding GPIO
+            // reply for an encoder-position request.
+            constexpr auto responseDelay = std::chrono::microseconds(8000);
+            if (!device_.ReadRegister(
+                    0x01, 0x04, gpioBytes, sizeof(gpioBytes), error,
+                    responseDelay))
                 return false;
             const uint32_t gpio = (static_cast<uint32_t>(gpioBytes[0]) << 24) |
                                   (static_cast<uint32_t>(gpioBytes[1]) << 16) |
@@ -552,16 +561,6 @@ namespace
 
             if (!ReadEncoderPosition(delta, error))
                 return false;
-
-            uint8_t flagBytes[4]{};
-            if (!device_.ReadRegister(0x01, 0x0A, flagBytes, sizeof(flagBytes), error))
-                return false;
-            const uint32_t flags =
-                (static_cast<uint32_t>(flagBytes[0]) << 24) |
-                (static_cast<uint32_t>(flagBytes[1]) << 16) |
-                (static_cast<uint32_t>(flagBytes[2]) << 8) |
-                flagBytes[3];
-            *buttonActivity = (flags >> 1) & 0x1Fu;
             return true;
         }
 
@@ -569,7 +568,10 @@ namespace
         bool ReadEncoderPosition(int32_t *delta, std::string *error)
         {
             uint8_t positionBytes[4]{};
-            if (!device_.ReadRegister(0x11, 0x30, positionBytes, sizeof(positionBytes), error))
+            constexpr auto responseDelay = std::chrono::microseconds(8000);
+            if (!device_.ReadRegister(
+                    0x11, 0x30, positionBytes, sizeof(positionBytes), error,
+                    responseDelay))
                 return false;
             const uint32_t rawPosition =
                 (static_cast<uint32_t>(positionBytes[0]) << 24) |
@@ -1485,7 +1487,6 @@ namespace
         bool candidateDigitalValue = false;
         uint32_t stableNavigationButtons = 0;
         uint32_t candidateNavigationButtons = 0;
-        uint32_t navigationActivityPending = 0;
         std::array<std::chrono::steady_clock::time_point, 5> navigationCandidateSince{};
         bool encoderButtonActivityPending = false;
         bool emittedPressedInitialized = false;
@@ -2003,9 +2004,8 @@ namespace
                                       std::chrono::milliseconds(runtime.configuration.encoderPollIntervalMs_);
             int32_t delta = 0;
             uint32_t buttons = 0;
-            uint32_t buttonActivity = 0;
             std::string error;
-            if (!runtime.navigation.Read(&delta, &buttons, &buttonActivity, &error))
+            if (!runtime.navigation.Read(&delta, &buttons, &error))
             {
                 SetError(runtime, error);
                 return;
@@ -2015,7 +2015,6 @@ namespace
                 runtime.initialized = true;
                 runtime.stableNavigationButtons = buttons;
                 runtime.candidateNavigationButtons = buttons;
-                runtime.navigationActivityPending = 0;
                 runtime.navigationCandidateSince.fill(now);
                 runtime.status.connected_ = true;
                 runtime.status.error_.clear();
@@ -2024,8 +2023,6 @@ namespace
                 UpdateStatus(runtime, true);
                 return;
             }
-
-            runtime.navigationActivityPending |= buttonActivity;
 
             if (delta != 0)
             {
@@ -2065,7 +2062,6 @@ namespace
                         runtime.stableNavigationButtons |= mask;
                     else
                         runtime.stableNavigationButtons &= ~mask;
-                    runtime.navigationActivityPending &= ~mask;
                     stableStateChanged = true;
                     events[eventCount++] = {
                         static_cast<GpioNavigationButton>(bit + 1), candidate};
@@ -2091,22 +2087,10 @@ namespace
                 UpdateStatus(runtime, true);
             }
 
-            // INTFLAG preserves a press that began and ended between polls.
-            // Navigation only acts on the rising edge, but emit the matching
-            // release too so event consumers always see a complete gesture.
-            for (int bit = 0; bit < 5; ++bit)
-            {
-                const uint32_t mask = 1u << bit;
-                if ((runtime.navigationActivityPending & mask) == 0 ||
-                    (buttons & mask) != 0 ||
-                    (runtime.candidateNavigationButtons & mask) != 0 ||
-                    (runtime.stableNavigationButtons & mask) != 0)
-                    continue;
-                runtime.navigationActivityPending &= ~mask;
-                const auto button = static_cast<GpioNavigationButton>(bit + 1);
-                EmitNavigationButton(runtime, button, true, false);
-                EmitNavigationButton(runtime, button, false, false);
-            }
+            // Navigation actions are intentionally emitted only from a pin
+            // state that survives the full debounce interval. Unlike optional
+            // parameter-encoder mappings, an interrupt flag alone must never
+            // synthesize an Up/Down/Left/Right/Select command.
 #else
             (void)runtime;
             (void)now;
