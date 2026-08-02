@@ -172,7 +172,10 @@ person at the controller.
 ## Next session
 
 1. Start from a clean `git status` and build the daemon on the Pi. Run the
-   Catch2 tests if `catch/catch.hpp` is available there.
+   Catch2 tests if `catch/catch.hpp` is available there. Note that upstream
+   v2.0.110 was merged in after the deployment recorded below, and the native
+   daemon has not been compiled against that merge -- only the web UI has.
+   Build before deploying again.
 2. Measure the real cadence of both workers before tuning anything further. The
    estimates above are budgets, not measurements.
 3. Run the quantitative tests: at least 100 clockwise and 100 anticlockwise
