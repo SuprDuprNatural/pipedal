@@ -9,7 +9,7 @@
 <img src="https://img.shields.io/github/downloads/rerdavies/pipedal/total?color=%23808080&link=https%3A%2F%2Frerdavies.github.io%2Fpipedal%2Fdownload.html"/>
 
 
-Download:&nbsp;<a href='https://rerdavies.github.io/pipedal/download.html'>v2.0.108</a> 
+Download:&nbsp;<a href='https://rerdavies.github.io/pipedal/download.html'>v2.0.110</a> 
 Website:&nbsp;[https://rerdavies.github.io/pipedal](https://rerdavies.github.io/pipedal).
 Documentation:&nbsp;[https://rerdavies.github.io/pipedal/Documentation.html](https://rerdavies.github.io/pipedal/Documentation.html).
 
@@ -18,29 +18,53 @@ Documentation:&nbsp;[https://rerdavies.github.io/pipedal/Documentation.html](htt
 ## About this fork
 
 This is a fork of [rerdavies/pipedal](https://github.com/rerdavies/pipedal), the
-upstream project, which all the documentation above describes. It tracks
-upstream and merges new releases in; everything upstream does still works here.
+upstream project that all the documentation above describes. It tracks upstream
+and merges new releases in, so everything upstream does still works here.
 
-It adds a handful of things built for one particular pedal build. They are
-listed below so you can tell at a glance whether any of it is useful to you.
+What it adds, in short: a much better way to see and use a whole pedalboard at
+once, and support for driving PiPedal from real hardware — encoders, an OLED, an
+LED matrix — instead of a screen.
 
-**Everything hardware-specific is off until you turn it on.** If you install
-this fork and change nothing, you get stock PiPedal. Specifically:
+### Pedalboard view
 
-| Addition | Default | Notes |
-| --- | --- | --- |
-| Hardware controls (GPIO switches, rotary encoders, ADC inputs, SSD1306 OLED, HT16K33 LED matrix) | Off | No I²C or GPIO device is opened, and no polling thread starts, unless enabled in settings. See [GpioControls.md](docs/GpioControls.md). |
-| AirPlay receiver (shairport-sync mixed into the main output) | Off | Needs shairport-sync installed and enabling in settings. |
-| Rack view | Available | An extra view showing every effect's controls on one scrollable page. Additive; the stock views are unchanged. |
-| Custom faces for Supr pedals | Inert without those plugins | Matched by exact LV2 plugin URI, so they never appear unless the matching plugin is installed. |
+The headline addition. Every effect in the chain laid out at once, each card
+sized to its own content, with live I/O meters down the side of each and the
+signal chain across the top.
 
-The custom faces are console-style UIs for the `Supr*` LV2 plugins, which are a
-separate project and are not included here. No stock plugin's UI is replaced or
-modified by this fork.
+<img src="docs/gallery/suprpedals-pedalboard.jpg" width="100%" />
 
-There is also one upstream bug fix that is not hardware-specific: the ALSA
-capture stream is restarted after an output underrun, which otherwise leaves
-input dead until the service is restarted.
+The point is that you can see and reach the whole rig at a glance instead of
+paging through one effect at a time — which is how you actually work when you're
+playing. There is also a **Rack view**, a stacked, collapsible variant of the
+same idea, alongside the stock single-effect view. Nothing upstream is removed;
+these sit beside it.
+
+The pedals shown above are **SuprPedals**, a separate LV2 plugin project. Their
+console-style faces do live in this fork, because that is where PiPedal's plugin
+UIs are defined — but they are matched by exact plugin URI, so they simply never
+appear unless the matching plugin is installed. No stock plugin's UI is replaced
+or modified by this fork.
+
+### Hardware controls
+
+Drive PiPedal from physical controls: GPIO switches, rotary encoders and ADC
+inputs, an SSD1306 OLED for navigation and metering, and an HT16K33 LED matrix
+for a spectrum or level display. Full details in
+[GpioControls.md](docs/GpioControls.md).
+
+### AirPlay receiver
+
+Take AirPlay audio from a phone or laptop straight into the pedal via
+shairport-sync — handy for playing along with a backing track. It can be routed
+to any output on the audio interface, not only the outputs PiPedal is using for
+guitar, so it can go to a separate monitor or headphone feed.
+
+### None of it is in your way
+
+If you install this fork and change nothing, you get stock PiPedal plus the
+extra views. The hardware controls and the AirPlay receiver are both **off**
+until enabled in settings — no I²C or GPIO device is opened and no polling
+thread starts — and the custom plugin faces never appear without their plugins.
 
 ### If you only want one piece of this
 
@@ -51,7 +75,7 @@ issue and it can be pulled out onto a clean branch off upstream.
 
 ---
 
-#### Announcing PiPedal 2.0 (2.0.108)&mdash;a major update to PiPedal, including exciting new features. See the Pipedal website [documentation](https://rerdavies.github.io/pipedal/) for more information.
+#### Announcing PiPedal 2.0 (2.0.110)&mdash;a major update to PiPedal, including exciting new features. See the Pipedal website [documentation](https://rerdavies.github.io/pipedal/) for more information.
 
 &nbsp;
 

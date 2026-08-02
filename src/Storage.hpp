@@ -89,6 +89,7 @@ private:
     void UpgradeV1FactoryPresets();
     void MoveExistingFactoryPresetsBank();
     void UpgradeV3FactoryPresets();
+    void AddNewFactoryPresets();
     void InstallFactoryPresets();
     void CopyFactoryPresetsToDefaultBank();
     void ProvisionDefaultBanks();
@@ -236,6 +237,7 @@ public:
 
     const ChannelSelection& GetChannelSelection() const;
 
+    void CleanWorkingDirectories();
 
     //std::string MapPropertyFileName(Lv2PluginInfo*pluginInfo, const std::string&path);
 

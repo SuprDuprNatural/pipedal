@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.16.0)
 project(pipedal 
-    VERSION 2.0.108
+    VERSION 2.0.110
     DESCRIPTION "PiPedal Guitar Effect Pedal For Raspberry Pi"
     HOMEPAGE_URL "https://rerdavies.github.io/pipedal"
 )
 
-set (DISPLAY_VERSION "PiPedal v2.0.108-Release")
+set (DISPLAY_VERSION "PiPedal v2.0.110-Release")
 
 option(PIPEDAL_DISABLE_COPYRIGHT_BUILD "Skip generation of copyright notices (use on non-Debian distros)" OFF)
 option(PIPEDAL_EXCLUDE_TESTS "Exclude test targets from default build" OFF)
@@ -37,10 +37,6 @@ set (SQLITECPP_INSTALL OFF CACHE BOOL "Disable SQLiteCpp install" FORCE)
 
 set(SUBMODULE_INSTALL OFF CACHE BOOL "" FORCE)
 
-# Remove SQLiteCPP install files. 
-set(CPACK_SOURCE_IGNORE_FILES
-    "*.a;sqlite3.h;$(CPACK_SOURCE_IGNORE_FILES)"
-)
 
 include(CTest)
 enable_testing()
@@ -56,7 +52,9 @@ add_subdirectory("src")
 
 set (VITE_BUILD_DIRECTORY ${PROJECT_SOURCE_DIR}/vite/dist/)
 
+
 # install
+
 
 install(
     DIRECTORY config/ DESTINATION /etc/pipedal/config

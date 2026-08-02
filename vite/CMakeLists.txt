@@ -7,8 +7,8 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
     set(BUILD_REACT "echo")
     set(BUILD_REACT_ARGS Skipping react debug build)
 elseif(NPM_COMMAND)
-    set(BUILD_REACT ${NPM_COMMAND})
-    set(BUILD_REACT_ARGS run build)
+    set(BUILD_REACT "./build.sh")
+    set(BUILD_REACT_ARGS)
 elseif(EXISTS "${PROJECT_SOURCE_DIR}/vite/dist/index.html")
     # Deployment hosts do not need Node when a verified frontend bundle was
     # built elsewhere and staged in vite/dist.

@@ -892,6 +892,8 @@ add_executable(pipedaladmind AdminMain.cpp CommandLineParser.hpp
     )
 target_link_libraries(pipedaladmind PRIVATE PiPedalCommon pthread atomic stdc++fs systemd asound)
 
+if(NOT PIPEDAL_DISABLE_COPYRIGHT_BUILD)
+
 add_executable(processcopyrights copyrightMain.cpp
     CommandLineParser.hpp
     PiPedalException.hpp
@@ -901,6 +903,7 @@ target_link_libraries(processcopyrights PRIVATE PiPedalCommon stdc++fs)
 set (REACT_BUILD_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../build/react/build/)
 set (REACT_NOTICES_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../build/src/notices.txt)
 set (DEBIAN_COPYRIGHT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../debian/copyright)
+set (DEBIAN_COPYRIGHT_EXTRA_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../debian/fill.copyright.blanks.yml)
 
 
 # generate Copyright section of settings page.
@@ -924,11 +927,10 @@ add_custom_command(OUTPUT ${REACT_NOTICES_FILE}
         --projectCopyright ${DEBIAN_COPYRIGHT_FILE}
         liblilv-0-0 ${BOOST_COPYRIGHT_DIR} lv2-dev librsvg2-2 libpango-1.0-0 libx11-6 libxrandr2
 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS ${DEBIAN_COPYRIGHT_FILE} "$<TARGET_FILE:processcopyrights>"
+    DEPENDS ${DEBIAN_COPYRIGHT_FILE} ${DEBIAN_COPYRIGHT_EXTRA_FILE} "$<TARGET_FILE:processcopyrights>"
     COMMENT "Updating copyright notices."
 )
 
-if(NOT PIPEDAL_DISABLE_COPYRIGHT_BUILD)
     add_custom_target (
         CopyrightBuild ALL
         DEPENDS ${REACT_NOTICES_FILE}

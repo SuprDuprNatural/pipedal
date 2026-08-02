@@ -545,6 +545,7 @@ export class PiPedalModel //implements PiPedalModel
     modResourcesUrl: string = "";
     lv2Path: string = "";
     webSocket?: PiPedalSocket;
+    t3k_redirect_url: string = "";
 
 
     static getInstance(): PiPedalModel {
@@ -1396,7 +1397,23 @@ export class PiPedalModel //implements PiPedalModel
         try {
             const myRequest = new Request(this.varRequest('config.json'));
             let response: Response = await fetch(myRequest);
-            let data = await response.json();
+            if (response.status !== 200) {
+                if (response.status === 500) {
+
+                    window.location.href = this.varRequest('config.json');
+                    return false;
+                } else {
+                    this.setError("Can't connect to server. (" + response.status.toString() + " " + response.statusText + ")");
+                    return false;
+                }
+            }
+            let data: any 
+            try {
+                data = await response.json();
+            } catch (error) {
+                this.setError("Failed to connect to server. " + getErrorMessage(error));
+                return false;
+            }
 
             this.tone3000_A2_models = data.tone3000_A2_models ?? true;
             this.enableAutoUpdate = !!data.enable_auto_update;
@@ -1408,12 +1425,13 @@ export class PiPedalModel //implements PiPedalModel
                 this.androidHost = new FakeAndroidHost();
             }
             this.debug = !!data.debug;
-            let { socket_server_port, socket_server_address, max_upload_size } = data;
+            let { socket_server_port, socket_server_address, t3k_server_address: t3k_redirect_url, max_upload_size } = data;
+
+            if (!socket_server_port) socket_server_port = 8080;
 
             if ((!socket_server_address) || socket_server_address === "*") {
                 socket_server_address = window.location.hostname;
             }
-            if (!socket_server_port) socket_server_port = 8080;
             if ((import.meta as any).env?.DEV) {
                 // In dev, stay same-origin and let the vite dev server proxy
                 // /pipedal, /var and /resources to the pipedald server
@@ -1421,6 +1439,18 @@ export class PiPedalModel //implements PiPedalModel
                 socket_server_address = window.location.hostname;
                 socket_server_port = parseInt(window.location.port) || 80;
             }
+            // Built after the dev override so the Tone3000 callback points at
+            // the port the browser actually reached us on.
+            if (!t3k_redirect_url) {
+                t3k_redirect_url = "";
+            } else {
+                t3k_redirect_url = "http://" + t3k_redirect_url;
+                if (socket_server_port != 80) {
+                    t3k_redirect_url += ":" + socket_server_port.toString();
+                }
+            }
+
+
             let socket_server = this.makeSocketServerUrl(socket_server_address, socket_server_port);
             let var_server_url = this.makeVarServerUrl("http", socket_server_address, socket_server_port);
             this.modResourcesUrl = this.makeModResourceUrl("http", socket_server_address, socket_server_port);
@@ -1428,6 +1458,7 @@ export class PiPedalModel //implements PiPedalModel
             this.socketServerUrl = socket_server;
             this.varServerUrl = var_server_url;
             this.serverUrl = this.makeServerUrl("http", socket_server_address, socket_server_port);
+            this.t3k_redirect_url = t3k_redirect_url ?? "BAD_URL:";
             this.maxFileUploadSize = parseInt(max_upload_size);
         } catch (error: any) {
             this.setError("Can't connect to server. " + getErrorMessage(error));
