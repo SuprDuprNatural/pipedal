@@ -7,7 +7,9 @@
 #include "GpioTuner.hpp"
 #include "Pedalboard.hpp"
 
+#include <chrono>
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -110,6 +112,138 @@ TEST_CASE("ANO navigation and HT16K33 matrix settings are validated", "[gpio]")
     settings.ledMatrix_.floorDb_ = -48.0f;
     settings.ledMatrix_.mode_ = 2;
     REQUIRE_THROWS_AS(GpioManager::Validate(settings), std::invalid_argument);
+}
+
+namespace
+{
+    // Drives GpioNavigationPositionFilter over a run of samples. A step of
+    // corruptSample stands for a corrupt I2C word: the bus reports garbage and
+    // the true position is unchanged by the next sample.
+    constexpr int64_t corruptSample = std::numeric_limits<int64_t>::min();
+
+    struct NavigationFilterRun
+    {
+        int64_t physical = 0;
+        int32_t applied = 0;
+        int firstAppliedSample = -1;
+    };
+
+    NavigationFilterRun DriveNavigationFilter(
+        const std::vector<int64_t> &steps,
+        int samplePeriodMs,
+        int trailingIdleSamples = 4)
+    {
+        GpioNavigationPositionFilter filter;
+        auto now = std::chrono::steady_clock::now();
+        int64_t raw = 1000;
+        NavigationFilterRun run;
+        int sample = 0;
+
+        filter.Apply(static_cast<uint32_t>(raw), now); // establish the baseline
+
+        auto step = [&](uint32_t word)
+        {
+            now += std::chrono::milliseconds(samplePeriodMs);
+            ++sample;
+            const int32_t applied = filter.Apply(word, now);
+            if (applied != 0 && run.firstAppliedSample < 0)
+                run.firstAppliedSample = sample;
+            run.applied += applied;
+        };
+
+        for (int64_t counts : steps)
+        {
+            if (counts == corruptSample)
+            {
+                step(0x00FFFFFFu);
+                continue;
+            }
+            raw += counts;
+            run.physical += counts;
+            step(static_cast<uint32_t>(raw));
+        }
+        for (int index = 0; index < trailingIdleSamples; ++index)
+            step(static_cast<uint32_t>(raw));
+        return run;
+    }
+}
+
+// The navigation encoder reports a cumulative position, so the filter's job is
+// to tell a corrupt word from real movement without ever discarding real
+// movement. An earlier gate required movement to arrive in steps of two counts
+// or fewer, which silently dropped whole brisk gestures.
+TEST_CASE("Navigation movement survives the idle filter", "[gpio]")
+{
+    // 4 ms is the navigation worker's cadence; 20 ms was the old shared-worker
+    // cadence, kept here so the rules cannot regress into being speed-dependent.
+    for (int samplePeriodMs : {4, 20})
+    {
+        INFO("sample period " << samplePeriodMs << " ms");
+
+        const std::vector<std::vector<int64_t>> gestures{
+            {1},                        // one detent
+            {-1},                       // one detent, anticlockwise
+            {3},                        // one detent that bounces to three counts
+            {-3},                       // the same, anticlockwise
+            {1, 1, 1, 1, 1, 1},         // slow turn
+            {-1, -1, -1, -1, -1, -1},   // slow turn, anticlockwise
+            {3, 3, 3, 3},               // brisk flick
+            {-3, -3, -3, -3},           // brisk flick, anticlockwise
+            {6, 6, 6, 6},               // fast spin
+            {-6, -6, -6, -6},           // fast spin, anticlockwise
+            {1, 2, 3, 4},               // accelerating turn
+            {2, 2, -2, -2},             // reversal part way through
+            {2, 2, corruptSample, 2, 2} // a corrupt word mid-gesture
+        };
+        // Every real gesture must be applied in full.
+        for (const auto &gesture : gestures)
+        {
+            const auto run = DriveNavigationFilter(gesture, samplePeriodMs);
+            REQUIRE(run.applied == run.physical);
+        }
+
+        // A detent must reach the UI within one confirmation sample.
+        const auto detent = DriveNavigationFilter({1}, samplePeriodMs);
+        REQUIRE(detent.firstAppliedSample == 2);
+
+        // An untouched control must never navigate.
+        const std::vector<std::vector<int64_t>> quiet{
+            {corruptSample},
+            {corruptSample, corruptSample},
+            {corruptSample, 0, corruptSample, 0, corruptSample},
+            {0, 0, 0, 0, 0, 0}};
+        for (const auto &samples : quiet)
+        {
+            const auto run = DriveNavigationFilter(samples, samplePeriodMs);
+            REQUIRE(run.applied == 0);
+        }
+    }
+}
+
+TEST_CASE("A stuck navigation baseline recovers", "[gpio]")
+{
+    GpioNavigationPositionFilter filter;
+    auto now = std::chrono::steady_clock::now();
+    filter.Apply(1000, now);
+
+    // The device jumps far away and stays there, as it would after a reset.
+    // That must never replay as a burst of menu movement...
+    int32_t applied = 0;
+    for (int index = 0; index < 20; ++index)
+    {
+        now += std::chrono::milliseconds(4);
+        applied += filter.Apply(500000, now);
+    }
+    REQUIRE(applied == 0);
+
+    // ...but the encoder must not be stranded by it either.
+    int32_t afterRecovery = 0;
+    for (int index = 0; index < 3; ++index)
+    {
+        now += std::chrono::milliseconds(4);
+        afterRecovery += filter.Apply(500001, now);
+    }
+    REQUIRE(afterRecovery == 1);
 }
 
 TEST_CASE("Standard encoder roles migrate once and remain unique", "[gpio]")

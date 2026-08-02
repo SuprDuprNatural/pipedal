@@ -22,7 +22,9 @@
 
 #include "GpioTuner.hpp"
 #include "json.hpp"
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -310,6 +312,129 @@ namespace pipedal
         Left = 3,
         Down = 4,
         Right = 5
+    };
+
+    // Turns the ANO's raw cumulative-position words into applied movement.
+    //
+    // Two failure modes have to be told apart. A corrupt I2C word looks like a
+    // large jump that the following sample contradicts; real movement persists.
+    // So from idle one sample is held back and released only once a second
+    // sample agrees with it -- either the position stayed put or it carried on
+    // in the same direction. Confirmation then releases the whole accumulated
+    // movement, so a brisk turn costs one sample of latency instead of being
+    // dropped. Once movement is confirmed the filter stays open briefly, and a
+    // continuing turn is applied with no further delay.
+    //
+    // Deliberately free of I2C so the rules can be tested directly.
+    class GpioNavigationPositionFilter
+    {
+    public:
+        using clock = std::chrono::steady_clock;
+
+        // Movement stays applied without re-confirmation for this long after a
+        // confirmed sample, which is what makes a sustained turn feel direct.
+        static constexpr auto activeWindow = std::chrono::milliseconds(120);
+
+        // Returns the movement to apply, in encoder counts. Zero means either
+        // no movement or movement that is not yet trusted.
+        int32_t Apply(uint32_t rawPosition, clock::time_point now)
+        {
+            if (!positionInitialized_)
+            {
+                Rebaseline(rawPosition, now);
+                positionInitialized_ = true;
+                return 0;
+            }
+
+            // A corrupt word appears as a jump no hand could produce in the time
+            // available. That budget has to run from the last *trusted* position
+            // rather than the last sample: while a sample is held for
+            // confirmation the baseline deliberately stays put, so measuring
+            // against the previous sample would let a fast turn outrun its own
+            // ceiling and be rejected -- which is exactly how the earlier gate
+            // discarded brisk gestures. The floor covers the normal fast
+            // cadence; the cap bounds how far one confirmation can move a menu.
+            const int64_t sinceBaseline =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - baselineTime_)
+                    .count();
+            const int64_t plausibleDelta = std::clamp<int64_t>(sinceBaseline * 2, 8, 64);
+            const int64_t candidate = static_cast<int32_t>(rawPosition - position_);
+
+            if (candidate == 0)
+            {
+                pendingValid_ = false;
+                implausibleSamples_ = 0;
+                return 0;
+            }
+
+            if (candidate > plausibleDelta || candidate < -plausibleDelta)
+            {
+                pendingValid_ = false;
+                // Never let one bad baseline strand the encoder permanently.
+                if (++implausibleSamples_ >= 8)
+                {
+                    Rebaseline(rawPosition, now);
+                    implausibleSamples_ = 0;
+                }
+                return 0;
+            }
+            implausibleSamples_ = 0;
+
+            if (now < activeUntil_)
+            {
+                // Already turning: apply movement at once. Latency here is what
+                // the player feels as responsiveness.
+                return Accept(rawPosition, now, candidate);
+            }
+
+            if (!pendingValid_)
+            {
+                pendingPosition_ = rawPosition;
+                pendingValid_ = true;
+                return 0;
+            }
+
+            const int64_t held = static_cast<int32_t>(pendingPosition_ - position_);
+            const int64_t continuation =
+                static_cast<int32_t>(rawPosition - pendingPosition_);
+            const bool stillThere = continuation == 0;
+            const bool keptGoing = (held > 0 && continuation > 0) ||
+                                   (held < 0 && continuation < 0);
+            if (stillThere || keptGoing)
+                return Accept(rawPosition, now, candidate);
+
+            // Disagreement: discard the unconfirmed word and keep the trusted
+            // baseline, but let this sample stand as the new candidate.
+            pendingPosition_ = rawPosition;
+            return 0;
+        }
+
+    private:
+        // Adopts rawPosition as the trusted baseline and restarts the
+        // plausibility budget. Does not by itself imply the player is turning.
+        void Rebaseline(uint32_t rawPosition, clock::time_point now)
+        {
+            position_ = rawPosition;
+            baselineTime_ = now;
+            pendingValid_ = false;
+        }
+
+        // Confirmed movement: adopt the position and hold the filter open so a
+        // continuing turn is applied without further confirmation.
+        int32_t Accept(uint32_t rawPosition, clock::time_point now, int64_t candidate)
+        {
+            Rebaseline(rawPosition, now);
+            activeUntil_ = now + activeWindow;
+            return static_cast<int32_t>(candidate);
+        }
+
+        uint32_t position_ = 0;
+        uint32_t pendingPosition_ = 0;
+        bool positionInitialized_ = false;
+        bool pendingValid_ = false;
+        int implausibleSamples_ = 0;
+        clock::time_point baselineTime_{};
+        clock::time_point activeUntil_{};
     };
 
     class GpioInputEvent

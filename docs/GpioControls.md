@@ -183,6 +183,16 @@ If several detents accumulated between polls, they are replayed as individual
 unit events. Implausible transient words are retried and discarded before they
 can reach an effect or the OLED.
 
+The navigation encoder adds one further rule, because an unsolicited menu jump
+is far worse than a few milliseconds of latency. Starting from rest, one sample
+is held back and applied only once the following sample agrees with it: either
+the position stayed put, or it carried on in the same direction. A corrupt
+one-shot word is never confirmed, so it is discarded rather than navigated.
+Confirmation then releases the whole accumulated movement and holds the filter
+open briefly, so a continuing turn is applied with no further delay. The cost is
+a single sample of latency on the first detent of a gesture, and no movement is
+ever discarded for arriving quickly.
+
 This means assigning or changing a mapping can never jump a parameter to an
 encoder's historical position.
 
@@ -226,7 +236,9 @@ layer: four parameters, live waveform, built-in chromatic strobe tuner, or blank
 
 The tuner analyses a lock-free copy of the main input and does not need a tuner effect in the current preset. It reuses the SuprTuner bass-first 18–500 Hz NSDF design, including low-B acquisition, nearest-note/cents output, and octave-normalized strobe motion. Analysis only runs while the tuner screen is selected. The audio path is never altered.
 
-The waveform and tuner input are captured from real audio buffers through lock-free sample rings; they add no locks or allocation to the real-time audio callback. The OLED is refreshed at a deliberately modest rate so four encoder reads remain responsive on the shared I²C bus.
+The waveform and tuner input are captured from real audio buffers through lock-free sample rings; they add no locks or allocation to the real-time audio callback. The OLED is refreshed at a deliberately modest rate, and its frame is sent in small chunks that yield the shared I²C bus between them, so input polling stays responsive while the display redraws.
+
+Input polling is split across two workers. The ANO navigation controller needs a longer register-response time than the parameter encoders, so a single worker made every device wait for the slowest one. Polling them separately lets each run at its own rate; both dispatch through the model's serialized post queue, so the split adds no locking to event handling.
 
 ## Rounded 5x5 audio matrix
 
@@ -254,8 +266,8 @@ Return to the GPIO settings screen and select the channel. Common ADC resolution
 - **Clockwise decreases:** toggle **Reverse rotation** for that encoder.
 - **OLED is blank:** verify 3.3 V power, select `0x3C` with its address switch off, and check that no encoder uses `0x3C`.
 - **ANO navigation is missing:** its default address is `0x49`, not the `0x36` used by a QT parameter encoder; verify the input type and address together.
-- **Navigation is sluggish:** configure the Raspberry Pi header bus for 400 kHz as described above. PiPedal still gives the ANO's ATtiny816 the 8 ms register-response time used by Adafruit's Linux driver; the four parameter encoders retain the faster response path.
-- **Encoder turns or button taps are missed:** use the standard 1 ms poll and 10 ms encoder-button debounce settings, configure the header bus for 400 kHz, and keep SDA/SCL wiring short with a common ground. PiPedal polls inputs on a worker independent of OLED rendering and reads the seesaw's accumulated absolute position. Ordinary parameter-encoder buttons can recover short taps from latched GPIO activity; safety-critical navigation commands require the sampled pin to survive the full debounce interval, so electrical spikes cannot move through menus.
+- **Navigation is sluggish:** configure the Raspberry Pi header bus for 400 kHz as described above. The ANO is polled on its own worker, so its register-response time no longer holds up the parameter encoders. Each read starts from a short response delay and escalates towards the conservative 8 ms only when an attempt actually fails, so a healthy device is sampled quickly and a struggling one still works.
+- **Encoder turns or button taps are missed:** use the standard 1 ms poll and 10 ms encoder-button debounce settings, configure the header bus for 400 kHz, and keep SDA/SCL wiring short with a common ground. PiPedal polls inputs on workers independent of OLED rendering and reads the seesaw's accumulated absolute position. Note that the debounce interval is a floor, not the whole story: a press must also be seen by two consecutive samples, so the sampling cadence sets the shortest tap that can register. Ordinary parameter-encoder buttons can recover short taps from latched GPIO activity; safety-critical navigation commands require the sampled pin to survive the full debounce interval, so electrical spikes cannot move through menus.
 - **ANO controls differ in reliability:** inspect both common connections. `COMA` serves the centre switch and rotary encoder; `COMB` serves Up/Down/Left/Right. Nearby grounded metal should not electromagnetically block this mechanical part, but case contact, board flex, or an intermittent common/solder joint can interrupt those circuits.
 - **LED matrix does not acknowledge:** with no jumpers use `0x70`; with `A0` bridged use `0x71`. Keep the Raspberry Pi wiring at 3.3 V unless a separately documented level shifter isolates 5 V from SDA/SCL.
 - **LED matrix is rotated or shifted:** enable its calibration arrow and adjust origin, rotation, and mirror before returning to audio mode.

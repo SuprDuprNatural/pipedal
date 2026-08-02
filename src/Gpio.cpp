@@ -369,15 +369,25 @@ namespace
             // A seesaw can briefly stretch or NACK a register transaction while
             // it services its encoder interrupt. Retry the complete pointer
             // write + read so a transient does not become a lost control poll.
+            //
+            // The reply also needs settling time after the pointer write. Paying
+            // the worst case on every read is what throttled the shared polling
+            // thread, so start from the caller's delay and escalate only when an
+            // attempt actually fails. A healthy device pays the short delay; a
+            // struggling one still reaches the conservative 8 ms that Adafruit's
+            // Linux driver applies unconditionally.
+            constexpr auto worstCaseResponseDelay = std::chrono::microseconds(8000);
+            auto delay = std::min(responseDelay, worstCaseResponseDelay);
             for (int attempt = 0; attempt < 3; ++attempt)
             {
                 if (::write(fd_, request, sizeof(request)) ==
                     static_cast<ssize_t>(sizeof(request)))
                 {
-                    std::this_thread::sleep_for(responseDelay);
+                    std::this_thread::sleep_for(delay);
                     if (::read(fd_, data, size) == static_cast<ssize_t>(size))
                         return true;
                 }
+                delay = std::min(delay * 4, worstCaseResponseDelay);
                 if (attempt != 2)
                     std::this_thread::sleep_for(std::chrono::microseconds(500));
             }
@@ -519,7 +529,7 @@ namespace
         {
             if (!device_.Open(configuration.i2cDevice_, configuration.i2cAddress_, error))
                 return false;
-            positionInitialized_ = false;
+            filter_ = {};
 
             // ANO adapter firmware exposes select/up/left/down/right as seesaw
             // GPIO pins 1..5. All five switches close to ground.
@@ -544,124 +554,62 @@ namespace
             std::string *error)
         {
             uint8_t gpioBytes[4]{};
-            // The ATtiny816 ANO firmware needs the conservative response time
-            // used by Adafruit's Linux/CircuitPython driver. With the generic
-            // 300 us fast path it can occasionally return the preceding GPIO
-            // reply for an encoder-position request.
-            constexpr auto responseDelay = std::chrono::microseconds(8000);
             if (!device_.ReadRegister(
-                    0x01, 0x04, gpioBytes, sizeof(gpioBytes), error,
-                    responseDelay))
+                    0x01, 0x04, gpioBytes, sizeof(gpioBytes), error, responseDelay))
                 return false;
-            const uint32_t gpio = (static_cast<uint32_t>(gpioBytes[0]) << 24) |
-                                  (static_cast<uint32_t>(gpioBytes[1]) << 16) |
-                                  (static_cast<uint32_t>(gpioBytes[2]) << 8) |
-                                  gpioBytes[3];
+            const uint32_t gpio = Word(gpioBytes);
             *pressedButtons = ((~gpio) >> 1) & 0x1Fu;
 
-            if (!ReadEncoderPosition(delta, error))
-                return false;
-            return true;
+            return ReadEncoderPosition(gpio, delta, error);
         }
 
     private:
-        bool ReadEncoderPosition(int32_t *delta, std::string *error)
+        // The ATtiny816 needs settling time after a register pointer write, but
+        // the 8 ms worst case only matters when the device is struggling.
+        // ReadRegister escalates to it on a failed attempt, and the stale-reply
+        // check below catches the one corruption this device actually shows, so
+        // healthy samples no longer pre-pay for a rare fault.
+        static constexpr auto responseDelay = std::chrono::microseconds(1200);
+
+        static uint32_t Word(const uint8_t *bytes)
         {
-            uint8_t positionBytes[4]{};
-            constexpr auto responseDelay = std::chrono::microseconds(8000);
-            if (!device_.ReadRegister(
-                    0x11, 0x30, positionBytes, sizeof(positionBytes), error,
-                    responseDelay))
-                return false;
-            const uint32_t rawPosition =
-                (static_cast<uint32_t>(positionBytes[0]) << 24) |
-                (static_cast<uint32_t>(positionBytes[1]) << 16) |
-                (static_cast<uint32_t>(positionBytes[2]) << 8) |
-                positionBytes[3];
-            const auto now = std::chrono::steady_clock::now();
-            if (!positionInitialized_)
-            {
-                position_ = rawPosition;
-                positionInitialized_ = true;
-                pendingPositionInitialized_ = false;
-                *delta = 0;
-                return true;
-            }
+            return (static_cast<uint32_t>(bytes[0]) << 24) |
+                   (static_cast<uint32_t>(bytes[1]) << 16) |
+                   (static_cast<uint32_t>(bytes[2]) << 8) |
+                   bytes[3];
+        }
 
-            const int64_t candidate = static_cast<int32_t>(rawPosition - position_);
-            if (candidate == 0)
-            {
-                pendingPositionInitialized_ = false;
-                *delta = 0;
-                return true;
-            }
-
-            // While the player is already turning, pass normal motion through
-            // without adding latency. At idle, require either the same new
-            // position twice or two small steps in the same direction. This
-            // rejects the occasional corrupted low byte that otherwise looks
-            // like several unsolicited navigation detents.
-            constexpr int64_t maximumActiveDelta = 8;
-            constexpr int64_t maximumIdleStep = 2;
-            if (now < activeUntil_ && std::abs(candidate) <= maximumActiveDelta)
-            {
-                position_ = rawPosition;
-                pendingPositionInitialized_ = false;
-                activeUntil_ = now + std::chrono::milliseconds(120);
-                *delta = static_cast<int32_t>(candidate);
-                return true;
-            }
-
-            if (pendingPositionInitialized_ && rawPosition != pendingPosition_)
-            {
-                const int64_t first = static_cast<int32_t>(pendingPosition_ - position_);
-                const int64_t continuation =
-                    static_cast<int32_t>(rawPosition - pendingPosition_);
-                const bool sameDirection =
-                    (first > 0 && continuation > 0) ||
-                    (first < 0 && continuation < 0);
-                if (sameDirection &&
-                    std::abs(first) <= maximumIdleStep &&
-                    std::abs(continuation) <= maximumIdleStep &&
-                    std::abs(candidate) <= maximumActiveDelta)
-                {
-                    position_ = rawPosition;
-                    pendingPositionInitialized_ = false;
-                    activeUntil_ = now + std::chrono::milliseconds(120);
-                    *delta = static_cast<int32_t>(candidate);
-                    return true;
-                }
-            }
-
-            if (!pendingPositionInitialized_ || rawPosition != pendingPosition_)
-            {
-                pendingPosition_ = rawPosition;
-                pendingPositionInitialized_ = true;
-                *delta = 0;
-                return true;
-            }
-
-            // A persistent jump larger than a person can produce between two
-            // idle samples is used only to re-establish the baseline. Never
-            // replay it as a burst of menu movement.
-            pendingPositionInitialized_ = false;
-            position_ = rawPosition;
-            if (std::abs(candidate) <= maximumIdleStep)
-            {
-                activeUntil_ = now + std::chrono::milliseconds(120);
-                *delta = static_cast<int32_t>(candidate);
-                return true;
-            }
+        bool ReadEncoderPosition(uint32_t gpio, int32_t *delta, std::string *error)
+        {
             *delta = 0;
+
+            uint8_t positionBytes[4]{};
+            if (!device_.ReadRegister(
+                    0x11, 0x30, positionBytes, sizeof(positionBytes), error, responseDelay))
+                return false;
+            uint32_t rawPosition = Word(positionBytes);
+            if (rawPosition == gpio)
+            {
+                // The observed corruption is a position request answered with
+                // the preceding GPIO reply. That is directly detectable, so
+                // re-read it with the conservative delay rather than making
+                // every healthy sample wait for it. A position word can never
+                // legitimately equal the GPIO word on this device.
+                if (!device_.ReadRegister(
+                        0x11, 0x30, positionBytes, sizeof(positionBytes), error,
+                        std::chrono::microseconds(8000)))
+                    return false;
+                rawPosition = Word(positionBytes);
+                if (rawPosition == gpio)
+                    return true; // No trustworthy reading; report no movement.
+            }
+
+            *delta = filter_.Apply(rawPosition, std::chrono::steady_clock::now());
             return true;
         }
 
         I2cDevice device_;
-        uint32_t position_ = 0;
-        uint32_t pendingPosition_ = 0;
-        bool positionInitialized_ = false;
-        bool pendingPositionInitialized_ = false;
-        std::chrono::steady_clock::time_point activeUntil_{};
+        GpioNavigationPositionFilter filter_;
     };
 
     // Small SSD1306 renderer. Text is deliberately uppercase: this compact
@@ -1498,6 +1446,30 @@ namespace
         std::chrono::steady_clock::time_point nextEncoderRead{};
     };
 
+    // Input polling is split across two workers so the ANO's long settling
+    // delays cannot throttle the parameter encoders, or vice versa.
+    enum class InputThreadRole
+    {
+        Controls,
+        Navigation,
+    };
+
+    bool BelongsToRole(const GpioInputConfiguration &input, InputThreadRole role)
+    {
+        const bool navigation = input.inputType() == GpioInputType::Navigation;
+        return navigation == (role == InputThreadRole::Navigation);
+    }
+
+    bool HasNavigationInput(const GpioSettings &settings)
+    {
+        for (const auto &input : settings.inputs_)
+        {
+            if (input.enabled_ && input.inputType() == GpioInputType::Navigation)
+                return true;
+        }
+        return false;
+    }
+
     class GpioManagerImpl final : public GpioManager
     {
     public:
@@ -1648,11 +1620,24 @@ namespace
             {
                 return;
             }
+            // The ANO runs on its own thread. Its per-sample settling delays are
+            // an order of magnitude longer than the parameter encoders', so a
+            // shared worker made each device wait on the other: navigation was
+            // sampled at roughly 40 Hz and the parameter encoders inherited its
+            // stalls. Separate threads let each run at its own natural rate.
             inputThread_ = std::make_unique<std::jthread>(
                 [this, settings](std::stop_token stopToken)
                 {
-                    RunInputs(stopToken, settings);
+                    RunInputs(stopToken, settings, InputThreadRole::Controls);
                 });
+            if (HasNavigationInput(settings))
+            {
+                navigationThread_ = std::make_unique<std::jthread>(
+                    [this, settings](std::stop_token stopToken)
+                    {
+                        RunInputs(stopToken, settings, InputThreadRole::Navigation);
+                    });
+            }
             if (settings.display_.enabled_ || settings.ledMatrix_.enabled_)
             {
                 displayThread_ = std::make_unique<std::jthread>(
@@ -1665,7 +1650,10 @@ namespace
 
         void Refresh() override
         {
-            refreshRequested_.store(true);
+            // Each input worker consumes its own flag; one shared flag would let
+            // whichever thread ran first swallow the other's refresh.
+            for (auto &flag : refreshRequested_)
+                flag.store(true);
         }
 
         std::vector<GpioInputStatus> GetStatuses() const override
@@ -1678,11 +1666,15 @@ namespace
         {
             if (inputThread_)
                 inputThread_->request_stop();
+            if (navigationThread_)
+                navigationThread_->request_stop();
             if (displayThread_)
                 displayThread_->request_stop();
             inputThread_.reset();
+            navigationThread_.reset();
             displayThread_.reset();
-            refreshRequested_.store(false);
+            for (auto &flag : refreshRequested_)
+                flag.store(false);
             redrawRequested_.store(false);
         }
 
@@ -2212,12 +2204,15 @@ namespace
 #endif
         }
 
-        void RunInputs(std::stop_token stopToken, const GpioSettings &settings)
+        void RunInputs(
+            std::stop_token stopToken,
+            const GpioSettings &settings,
+            InputThreadRole role)
         {
             std::vector<std::unique_ptr<RuntimeInput>> runtimes;
             for (const auto &input : settings.inputs_)
             {
-                if (!input.enabled_)
+                if (!input.enabled_ || !BelongsToRole(input, role))
                 {
                     continue;
                 }
@@ -2273,9 +2268,10 @@ namespace
                 runtimes.push_back(std::move(runtime));
             }
 
+            auto &refreshFlag = refreshRequested_[static_cast<size_t>(role)];
             while (!stopToken.stop_requested())
             {
-                bool refresh = refreshRequested_.exchange(false);
+                bool refresh = refreshFlag.exchange(false);
                 if (refresh)
                     redrawRequested_.store(true);
                 auto now = std::chrono::steady_clock::now();
@@ -2389,8 +2385,9 @@ namespace
         std::atomic<bool> tunerResetRequested_ = true;
 
         std::unique_ptr<std::jthread> inputThread_;
+        std::unique_ptr<std::jthread> navigationThread_;
         std::unique_ptr<std::jthread> displayThread_;
-        std::atomic<bool> refreshRequested_ = false;
+        std::array<std::atomic<bool>, 2> refreshRequested_{};
         std::atomic<bool> redrawRequested_ = false;
     };
 }
