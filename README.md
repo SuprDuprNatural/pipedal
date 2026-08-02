@@ -13,6 +13,44 @@ Download:&nbsp;<a href='https://rerdavies.github.io/pipedal/download.html'>v2.0.
 Website:&nbsp;[https://rerdavies.github.io/pipedal](https://rerdavies.github.io/pipedal).
 Documentation:&nbsp;[https://rerdavies.github.io/pipedal/Documentation.html](https://rerdavies.github.io/pipedal/Documentation.html).
 
+---
+
+## About this fork
+
+This is a fork of [rerdavies/pipedal](https://github.com/rerdavies/pipedal), the
+upstream project, which all the documentation above describes. It tracks
+upstream and merges new releases in; everything upstream does still works here.
+
+It adds a handful of things built for one particular pedal build. They are
+listed below so you can tell at a glance whether any of it is useful to you.
+
+**Everything hardware-specific is off until you turn it on.** If you install
+this fork and change nothing, you get stock PiPedal. Specifically:
+
+| Addition | Default | Notes |
+| --- | --- | --- |
+| Hardware controls (GPIO switches, rotary encoders, ADC inputs, SSD1306 OLED, HT16K33 LED matrix) | Off | No I²C or GPIO device is opened, and no polling thread starts, unless enabled in settings. See [GpioControls.md](docs/GpioControls.md). |
+| AirPlay receiver (shairport-sync mixed into the main output) | Off | Needs shairport-sync installed and enabling in settings. |
+| Rack view | Available | An extra view showing every effect's controls on one scrollable page. Additive; the stock views are unchanged. |
+| Custom faces for Supr pedals | Inert without those plugins | Matched by exact LV2 plugin URI, so they never appear unless the matching plugin is installed. |
+
+The custom faces are console-style UIs for the `Supr*` LV2 plugins, which are a
+separate project and are not included here. No stock plugin's UI is replaced or
+modified by this fork.
+
+There is also one upstream bug fix that is not hardware-specific: the ALSA
+capture stream is restarted after an output underrun, which otherwise leaves
+input dead until the service is restarted.
+
+### If you only want one piece of this
+
+The changes are not independent — the hardware, AirPlay and UI work all touch
+the same model, storage and socket layers — so cherry-picking a single feature
+out of `main` is not straightforward. If you want a specific change, open an
+issue and it can be pulled out onto a clean branch off upstream.
+
+---
+
 #### Announcing PiPedal 2.0 (2.0.108)&mdash;a major update to PiPedal, including exciting new features. See the Pipedal website [documentation](https://rerdavies.github.io/pipedal/) for more information.
 
 &nbsp;
