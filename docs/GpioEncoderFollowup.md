@@ -147,9 +147,27 @@ Done off-device:
 - The threading and delay-escalation constructs were compile-checked in
   isolation, including that both workers now observe a refresh.
 
-Not yet done -- the native daemon has not been compiled, because this project
-builds on the Pi and no local Linux toolchain was available. **Build before
-deploying.**
+Done on-device:
+
+- The daemon builds clean, and the filter tests pass on aarch64 when built from
+  the deployed header.
+- Seven I2C handles open (four parameter encoders, ANO, OLED, matrix) and three
+  I2C worker threads run where there were previously two, confirming the split
+  took effect rather than merely compiling.
+- **The 30-minute untouched soak passed.** Across 30 one-minute samples the
+  service stayed active with no restarts and a constant 16 threads at about 15%
+  CPU; all 1015 persistent state files were byte-identical at the end; there
+  were zero audio underruns and no GPIO, I2C, or encoder errors logged.
+- In normal playing use the encoder was reported as feeling much better.
+
+Note what the soak can and cannot show. It compares every persistent state file,
+so a phantom that applied a preset or moved a parameter would be caught. A
+phantom that only moved the menu highlight without applying anything writes
+nothing to disk and would not be. Ruling that out needs the instrumented build
+described below.
+
+Still outstanding: the quantitative detent and button counts, which need a
+person at the controller.
 
 ## Next session
 
@@ -160,14 +178,15 @@ deploying.**
 3. Run the quantitative tests: at least 100 clockwise and 100 anticlockwise
    detents, recording physical detents against UI navigation events; then 100
    presses of centre and each direction button, then a quick-press test.
-4. Run the untouched soak with the OLED, matrix, and audio active.
-5. If anticlockwise is still worse than clockwise, the cause is now most likely
+4. If anticlockwise is still worse than clockwise, the cause is now most likely
    physical. Inspect or reflow COMA (centre button and rotary encoder), COMB
    (direction buttons), ENCA, and ENCB, and check connector strain and clearance
    from the metal enclosure.
-6. The one number most worth tuning from measurements is the ANO base response
+5. The one number most worth tuning from measurements is the ANO base response
    delay of 1200 us in `SeesawNavigationEncoder::responseDelay`. If stale-reply
    retries show up often, raise it; if they never occur, it can come down.
+   Note that nothing currently reports how often that retry path fires, so
+   tuning it usefully means adding a counter to the stale-reply branch first.
 
 ### Still open
 
@@ -186,7 +205,8 @@ deploying.**
 - At least 99/100 normal presses for the centre and every direction button.
 - A documented minimum quick-press duration that remains reliable.
 - Zero spontaneous navigation events during a 30-minute untouched soak with the
-  OLED, matrix, and audio active.
+  OLED, matrix, and audio active. **Met**, to the limit described under
+  Verification: no persistent state changed, and nothing was logged.
 - No stale I2C responses, persistent I2C errors, or audio underruns caused by
   input polling.
 - No loss of responsiveness or accuracy on the four parameter encoders.
