@@ -26,9 +26,9 @@
 // tell the server on release rather than on every pixel of the drag.
 //
 // Reusable: point it at any port with any step, range and size. See
-// docs/DESIGN_LANGUAGE.md in the SuprPedals repo for where it fits.
+// docs/SUPRDESIGN.md in either repository for where it fits.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React from 'react';
 import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";

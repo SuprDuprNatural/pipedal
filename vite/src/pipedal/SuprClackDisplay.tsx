@@ -21,7 +21,7 @@
 // All three ports are peak-held in the DSP (120 ms decay) precisely so a
 // display polling at 30 Hz cannot miss the few-millisecond clack events.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import { Component } from 'react';
 import { Theme } from '@mui/material/styles';

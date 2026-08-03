@@ -10,7 +10,7 @@
 // predates the live ports, everything falls back to the static control
 // values — the plot still draws, it just doesn't dance.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React, { Component } from 'react';
 import { Theme } from '@mui/material/styles';

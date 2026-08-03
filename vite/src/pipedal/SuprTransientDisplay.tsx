@@ -17,7 +17,7 @@
 // polling at 30 Hz cannot miss the few-millisecond attack events; a short
 // CSS transition smooths the steps between polls.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import { Component } from 'react';
 import { Theme } from '@mui/material/styles';

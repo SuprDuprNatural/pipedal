@@ -2,7 +2,7 @@
 // SuprCompressor, a stereo needle VU for SuprVU, and live filter-response
 // plots for SuprOctavePlus and SuprEnvelope.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React from 'react';
 import { Theme } from '@mui/material/styles';

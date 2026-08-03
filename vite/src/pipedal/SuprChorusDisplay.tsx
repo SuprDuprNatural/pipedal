@@ -26,7 +26,7 @@
 // band at once. Motion is advanced locally from Rate and nudged toward the
 // monitored lfo port, which arrives far too slowly to animate from directly.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React, { Component } from 'react';
 import { MonitorPortHandle, PiPedalModel, PiPedalModelFactory, State } from "./PiPedalModel";

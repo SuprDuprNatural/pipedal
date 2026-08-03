@@ -9,7 +9,7 @@
 // rangeToValue methods provide the host's log taper and quantisation, and
 // formatDisplayValue preserves scale-point labels and unit formatting.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React from 'react';
 import { isDarkMode } from './DarkMode';

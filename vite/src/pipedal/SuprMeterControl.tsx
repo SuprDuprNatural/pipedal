@@ -2,7 +2,7 @@
 // and VU displays). Styled after the GxTuner meter face. Subscribes to LV2
 // output control ports via PiPedalModel.monitorPort.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React, { Component } from 'react';
 import { Theme } from '@mui/material/styles';

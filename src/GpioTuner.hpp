@@ -1,4 +1,4 @@
-// Copyright (c) 2026 SuprDuprNatural
+// Copyright (c) 2026 SuprPedals contributors
 // SPDX-License-Identifier: MIT
 //
 // Bass-first pitch and strobe analysis for PiPedal's small hardware display.

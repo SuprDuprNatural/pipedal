@@ -27,11 +27,10 @@ LED matrix — instead of a screen.
 
 ### Pedalboard view
 
-The headline addition. Every effect in the chain laid out at once, each card
-sized to its own content, with live I/O meters down the side of each and the
-signal chain across the top.
+Every effect in the chain laid out at once, each card sized to its own content,
+with live I/O meters down the side of each and the signal chain across the top.
 
-<img src="docs/gallery/suprpedals-pedalboard.jpg" width="100%" />
+<img src="docs/gallery/suprpedals-pedalboard.png" width="100%" />
 
 The point is that you can see and reach the whole rig at a glance instead of
 paging through one effect at a time — which is how you actually work when you're
@@ -190,5 +189,4 @@ If your USB audio adapter has MIDI connectors, you can use MIDI devices (keyboar
 
 
  
-
 

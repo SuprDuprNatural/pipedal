@@ -27,7 +27,7 @@
 // a negative dB and the drive publishes its action as a positive one, so
 // the sign is normalised here and the dots only ever mean "how much".
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import { Component } from 'react';
 import { Theme } from '@mui/material/styles';

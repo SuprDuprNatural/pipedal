@@ -1,9 +1,9 @@
 // SuprTunerDisplay: the compact display-only face for the Supr bass tuner.
 //
-// Its five scalar inputs are also the complete state needed by a future OLED
-// renderer; this SVG deliberately contains no setup controls or status chrome.
+// Its five scalar inputs are the display contract for the plugin-backed web
+// face. PiPedal's passive OLED tuner has its own main-input analyser.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React, { Component } from 'react';
 import { MonitorPortHandle, PiPedalModel, PiPedalModelFactory, State } from "./PiPedalModel";

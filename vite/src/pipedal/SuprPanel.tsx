@@ -16,7 +16,7 @@
 // TooB EQ read as one dense instrument face). When the window is narrower
 // than the content, whole columns wrap and each wrapped row centers.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React, { ReactNode } from 'react';
 import Typography from '@mui/material/Typography';

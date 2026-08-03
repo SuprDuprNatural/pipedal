@@ -15,7 +15,7 @@
 //    screen next to Level and Blend would bury the controls that matter. They
 //    collapse into a "Filters" button per slot.
 //
-// MIT license, (c) 2026 SuprDuprNatural.
+// MIT license, (c) 2026 SuprPedals contributors.
 
 import React, { ReactNode } from 'react';
 import { Theme } from '@mui/material/styles';
