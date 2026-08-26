@@ -145,3 +145,15 @@ TEST_CASE("ALSA Test", "[pipedal_alsa_test][Build][Dev]")
 
     DiscoveryTest();
 }
+
+TEST_CASE("Raspberry Pi Codec Zero identity", "[Build][codec_zero]")
+{
+    REQUIRE(IsRaspberryPiCodecZero("Zero", "RPi_Codec_Zero", "RPi Codec Zero", "RPi Codec Zero"));
+    REQUIRE(IsRaspberryPiCodecZero("IQaudIOCODEC", "IQaudIOCODEC", "IQaudio Codec", "IQaudIOCODEC"));
+    REQUIRE_FALSE(IsRaspberryPiCodecZero("CODEC", "USB-Audio", "USB AUDIO CODEC", "USB Audio Device"));
+    REQUIRE_FALSE(IsRaspberryPiCodecZero("Zero", "USB-Audio", "USB Codec Zero", "USB Audio Device"));
+    REQUIRE_FALSE(IsRaspberryPiCodecZero("Zero", "USB-Audio", "RPi Codec Zero", "Raspberry Pi Codec Zero USB"));
+    REQUIRE_FALSE(IsRaspberryPiCodecZero("Zero", "snd_rpi_dac", "RPi DAC", "RPi DAC HAT"));
+    REQUIRE_FALSE(IsRaspberryPiCodecZero("M2", "USB-Audio", "Raspberry Pi Codec Zero USB", "USB Audio"));
+    REQUIRE_FALSE(IsRaspberryPiCodecZero("M2", "USB-Audio", "MOTU M2", "MOTU M2 at usb-0000"));
+}

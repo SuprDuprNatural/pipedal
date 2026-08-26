@@ -67,6 +67,8 @@ When you connect to PiPedal for the first time, you will be presented with an On
 
 Once connected, select the Settings menu item on the Hamburger menu at the top left corner of the display. Click on Audio Device Settings to select and configure the audio device you want to use. 
 
+The Raspberry Pi Codec Zero is available as **Raspberry Pi Codec Zero (Stereo AUX)** when its HAT has been detected. PiPedal configures its stereo AUX input/output routing automatically whenever it is selected. See [Raspberry Pi Codec Zero](CodecZero.md) for wiring and level guidance. External USB audio interfaces remain available in the same input and output device lists.
+
 You may also need to choose which audio input and output channels you will use for guitar signals, once you have selected and configured 
 an audio device. Many external USB audio devices that have two inputs provide the guitar signal on the right channel only, so you will set the audio input channels to  "Right Only". If your USB audio adapter has more than two input or output channels, you will be offered a list of channels to choose from.
 

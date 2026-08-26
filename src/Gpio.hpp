@@ -259,6 +259,20 @@ namespace pipedal
         DECLARE_JSON_MAP(GpioChipInfo);
     };
 
+    // Hardware such as an audio HAT may own GPIO lines even though the GPIO
+    // character device still permits userspace to request them. Requesting one
+    // of those lines changes its pin mux and can silently break the peripheral.
+    // Reservations are runtime-only: the saved control remains intact and can
+    // become available again when the hardware is removed.
+    struct GpioLineReservation
+    {
+        std::string chip_;
+        int32_t line_ = -1;
+        std::string reason_;
+    };
+
+    using GpioLineReservations = std::vector<GpioLineReservation>;
+
     class GpioAnalogChannel
     {
     public:
@@ -549,7 +563,9 @@ namespace pipedal
         virtual GpioDisplayMode CycleDisplayMode() = 0;
         virtual void SetDisplayMode(GpioDisplayMode mode) = 0;
         virtual GpioDisplayMode GetDisplayMode() const = 0;
-        virtual void Configure(const GpioSettings &settings) = 0;
+        virtual void Configure(
+            const GpioSettings &settings,
+            const GpioLineReservations &reservations = {}) = 0;
         virtual void Refresh() = 0;
         virtual std::vector<GpioInputStatus> GetStatuses() const = 0;
         virtual void Close() = 0;

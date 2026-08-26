@@ -2156,7 +2156,10 @@ pipedal::JackServerSettings Storage::GetJackServerSettings()
             result.SetAlsaOutputDevice(legacyDeviceId, "");
             result.SetLegacyAlsaDevice("");
         }
-        result.FixUpDeviceNames();
+        if (result.FixUpDeviceNames())
+        {
+            SetJackServerSettings(result);
+        }
     }
 
     return result;

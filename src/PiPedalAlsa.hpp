@@ -30,6 +30,7 @@ namespace pipedal {
         std::string id_;
         std::string name_;
         std::string longName_;
+        std::string deviceProfile_;
         std::vector<uint32_t> sampleRates_;
         uint32_t minBufferSize_ = 0,maxBufferSize_ = 0;
         bool supportsCapture_ = false;
@@ -44,6 +45,24 @@ namespace pipedal {
         DECLARE_JSON_MAP(AlsaDeviceInfo);
 
     };
+
+    inline constexpr const char *ALSA_DEVICE_PROFILE_CODEC_ZERO_AUX = "rpi-codec-zero-aux";
+
+    // Exposed for device discovery tests and for recognizing older Codec Zero
+    // driver/card names.
+    bool IsRaspberryPiCodecZero(
+        const std::string &cardId,
+        const std::string &driver,
+        const std::string &cardName,
+        const std::string &longName);
+
+    // Applies any routing needed by an ALSA hardware profile. Devices without a
+    // recognized profile are left completely untouched.
+    void ConfigureAlsaDeviceForPiPedal(
+        const std::string &deviceId,
+        bool configureCapture,
+        bool configurePlayback);
+
     class AlsaMidiDeviceInfo {
     public:
         enum Direction {

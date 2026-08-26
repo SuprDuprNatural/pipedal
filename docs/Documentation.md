@@ -17,6 +17,7 @@
 #### [How to Build Presets With PiPedal](BuildingPresets.md)
 #### [An Intro to Snapshots](Snapshots.md)  
 #### [GPIO and I2C Hardware Controls](GpioControls.md)
+#### [Raspberry Pi Codec Zero](CodecZero.md)
 #### [AirPlay Receiver](AirPlay.md)
 #### [Neural Amp Modeler Calibration](NamCalibration.md)  
 #### [Choosing a USB Audio Adapter](ChoosingAUsbAudioAdapter.md)  

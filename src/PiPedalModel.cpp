@@ -260,6 +260,7 @@ void PiPedalModel::Init(const PiPedalConfiguration &configuration)
     {
         //
     }
+    RefreshCodecZeroPresence();
 
     this->channelRouterSettings = storage.GetChannelRouterSettings();
     pluginHost.OnConfigurationChanged(
@@ -511,6 +512,9 @@ void PiPedalModel::Load()
         }
     }
 
+    // Device publication can lag service initialization during boot. Refresh
+    // after WaitForAudioDeviceToComeOnline() and before any GPIO is opened.
+    RefreshCodecZeroPresence();
     RestartAudio();
 
     gpioManager = GpioManager::Create();
@@ -569,7 +573,7 @@ void PiPedalModel::Load()
                              readIndex, values, capacity, sampleRate)
                        : 0;
         });
-    gpioManager->Configure(gpioSettings);
+    ConfigureGpioManager();
     UpdateGpioDashboard();
 }
 
@@ -2434,16 +2438,34 @@ void PiPedalModel::SetJackServerSettings(const JackServerSettings &jackServerSet
 #endif
 
     this->jackServerSettings = jackServerSettings;
+    try
+    {
+        this->jackServerSettings.FixUpDeviceNames();
+    }
+    catch (const std::exception &e)
+    {
+        Lv2Log::warning(SS("Unable to refresh audio device names. " << e.what()));
+    }
+
+    const bool codecZeroWasPresent = codecZeroPresent;
+    RefreshCodecZeroPresence();
+    if (gpioManager && codecZeroWasPresent != codecZeroPresent)
+    {
+        // Release any newly reserved direct GPIO before the audio device is
+        // opened and its I2S pinctrl state is established.
+        ConfigureGpioManager();
+        UpdateGpioDashboard();
+    }
 
     // take a snapshot incase a client unsusbscribes in the notification handler (in which case the mutex won't protect us)
     std::vector<IPiPedalModelSubscriber::ptr> t{subscribers.begin(), subscribers.end()};
     for (auto &subscriber : t)
     {
-        subscriber->OnJackServerSettingsChanged(jackServerSettings);
+        subscriber->OnJackServerSettingsChanged(this->jackServerSettings);
     }
 
 #if ALSA_HOST
-    storage.SetJackServerSettings(jackServerSettings);
+    storage.SetJackServerSettings(this->jackServerSettings);
 
     FireJackConfigurationChanged(this->jackConfiguration);
 
@@ -3157,10 +3179,87 @@ void PiPedalModel::SetGpioSettings(const GpioSettings &settings)
     gpioPendingPresetId = -1;
     if (gpioManager)
     {
-        gpioManager->Configure(gpioSettings);
+        ConfigureGpioManager();
         UpdateGpioDashboard();
     }
     FireGpioSettingsChanged();
+}
+
+void PiPedalModel::RefreshCodecZeroPresence()
+{
+    codecZeroPresent = false;
+    bool selectedCodecIdWasDiscovered = false;
+    auto isCodecZeroId = [](std::string id)
+    {
+        std::transform(id.begin(), id.end(), id.begin(), [](unsigned char c)
+                       { return static_cast<char>(std::tolower(c)); });
+        return id == "hw:zero" || id == "hw:iqaudiocodec";
+    };
+    try
+    {
+        for (const auto &device : alsaDevices.GetAlsaDevices())
+        {
+            if (isCodecZeroId(device.id_))
+                selectedCodecIdWasDiscovered = true;
+            if (device.deviceProfile_ == ALSA_DEVICE_PROFILE_CODEC_ZERO_AUX)
+            {
+                codecZeroPresent = true;
+                return;
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        Lv2Log::warning(SS("Unable to check for Codec Zero GPIO reservations. " << e.what()));
+    }
+
+    // Card discovery can be temporarily incomplete while another process owns
+    // a PCM. Preserve protection for the stable card ids used by both hardware
+    // revisions whenever either one is already selected.
+    codecZeroPresent = !selectedCodecIdWasDiscovered &&
+                       (isCodecZeroId(jackServerSettings.GetAlsaInputDevice()) ||
+                        isCodecZeroId(jackServerSettings.GetAlsaOutputDevice()));
+}
+
+void PiPedalModel::ConfigureGpioManager()
+{
+    if (!gpioManager)
+    {
+        return;
+    }
+
+    GpioLineReservations reservations;
+    if (codecZeroPresent)
+    {
+        std::vector<std::string> headerChips;
+        GpioCapabilities capabilities = GpioManager::Discover();
+        for (const auto &gpioChip : capabilities.chips_)
+        {
+            std::string identity = gpioChip.name_ + " " + gpioChip.label_;
+            std::transform(identity.begin(), identity.end(), identity.begin(), [](unsigned char c)
+                           { return static_cast<char>(std::tolower(c)); });
+            if (identity.find("pinctrl-bcm") != std::string::npos ||
+                identity.find("pinctrl-rp1") != std::string::npos)
+            {
+                headerChips.push_back(gpioChip.path_);
+            }
+        }
+        if (headerChips.empty())
+            headerChips.push_back("/dev/gpiochip0");
+
+        for (const auto &chip : headerChips)
+        {
+            for (int32_t line = 18; line <= 21; ++line)
+            {
+                reservations.push_back({
+                    chip,
+                    line,
+                    "GPIO " + std::to_string(line) +
+                        " is reserved for the attached Raspberry Pi Codec Zero I2S audio interface."});
+            }
+        }
+    }
+    gpioManager->Configure(gpioSettings, reservations);
 }
 
 GpioCapabilities PiPedalModel::GetGpioCapabilities()
@@ -3691,7 +3790,7 @@ void PiPedalModel::AcceptGpioNavigationSelection()
         storage.SetGpioSettings(gpioSettings);
         if (reconfigure && gpioManager)
         {
-            gpioManager->Configure(gpioSettings);
+            ConfigureGpioManager();
             UpdateGpioDashboard();
         }
         FireGpioSettingsChanged();

@@ -117,7 +117,10 @@ static std::int32_t GetJackArg(const std::vector<std::string> &args, const std::
     }
 }
 
-static std::string GetAlsaDeviceName(const std::vector<AlsaDeviceInfo> &availableDevices, const std::string &id)
+static std::string GetAlsaDeviceName(
+    const std::vector<AlsaDeviceInfo> &availableDevices,
+    const std::string &id,
+    const std::string &previousName)
 {
     if (id.empty())
         return "";
@@ -126,12 +129,22 @@ static std::string GetAlsaDeviceName(const std::vector<AlsaDeviceInfo> &availabl
     {
         if (availableDevice.id_ == id)
         {
-            name = availableDevice.name_;
+            auto usbLocation = availableDevice.longName_.find(" at usb-");
+            name = usbLocation == std::string::npos
+                       ? availableDevice.name_
+                       : availableDevice.longName_.substr(0, usbLocation);
             break;
         }
     }
     if (name.empty())
     {
+        // Preserve the last descriptive name for an unplugged interface. The
+        // selected id is still authoritative, and a discovered device will
+        // replace a stale name (for example V476 left beside hw:Zero).
+        if (!previousName.empty())
+        {
+            return previousName;
+        }
         auto pos = id.find(":");
         if (pos != std::string::npos)
         {
@@ -140,19 +153,25 @@ static std::string GetAlsaDeviceName(const std::vector<AlsaDeviceInfo> &availabl
     }
     return name;
 }
-void JackServerSettings::FixUpDeviceNames()
+bool JackServerSettings::FixUpDeviceNames()
 {
-    if (
-        ((!this->alsaInputDevice_.empty()) && this->alsaInputDeviceName_.empty()) ||
-        (!this->alsaOutputDevice_.empty()) && this->alsaOutputDeviceName_.empty())
+    if (this->alsaInputDevice_.empty() && this->alsaOutputDevice_.empty())
     {
-
-        PiPedalAlsaDevices& alsaDevices = PiPedalAlsaDevices::instance();
-        std::vector<AlsaDeviceInfo> availableDevices = alsaDevices.GetAlsaDevices();
-
-        this->alsaInputDeviceName_ = GetAlsaDeviceName(availableDevices, this->alsaInputDevice_);
-        this->alsaOutputDeviceName_ = GetAlsaDeviceName(availableDevices, this->alsaOutputDevice_);
+        return false;
     }
+
+    PiPedalAlsaDevices& alsaDevices = PiPedalAlsaDevices::instance();
+    std::vector<AlsaDeviceInfo> availableDevices = alsaDevices.GetAlsaDevices();
+
+    const std::string inputName = GetAlsaDeviceName(
+        availableDevices, this->alsaInputDevice_, this->alsaInputDeviceName_);
+    const std::string outputName = GetAlsaDeviceName(
+        availableDevices, this->alsaOutputDevice_, this->alsaOutputDeviceName_);
+    const bool changed = inputName != this->alsaInputDeviceName_ ||
+                         outputName != this->alsaOutputDeviceName_;
+    this->alsaInputDeviceName_ = inputName;
+    this->alsaOutputDeviceName_ = outputName;
+    return changed;
 }
 
 

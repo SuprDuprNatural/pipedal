@@ -111,7 +111,7 @@ namespace pipedal
                    this->bufferSize_       == other.bufferSize_ &&
                    this->numberOfBuffers_  == other.numberOfBuffers_;
         }
-        void FixUpDeviceNames();
+        bool FixUpDeviceNames();
 
         DECLARE_JSON_MAP(JackServerSettings);
     };

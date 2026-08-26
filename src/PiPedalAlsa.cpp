@@ -25,6 +25,7 @@
 #include <mutex>
 #include <algorithm>
 #include "Finally.hpp"
+#include "PiPedalException.hpp"
 
 using namespace pipedal;
 
@@ -57,6 +58,370 @@ static bool isSupportedAudioDevice(const AlsaDeviceInfo &d)
 //    if (name.find("bcm2835") != std::string::npos) return false;
     return true;
 };
+
+static std::string ToLower(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
+                   { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+bool pipedal::IsRaspberryPiCodecZero(
+    const std::string &cardId,
+    const std::string &driver,
+    const std::string &cardName,
+    const std::string &longName)
+{
+    const std::string lowerCardId = ToLower(cardId);
+    const std::string lowerDriver = ToLower(driver);
+    const std::string identity = ToLower(cardName + " " + longName);
+    if (lowerDriver == "usb-audio")
+        return false;
+
+    // Match the stable card id and the ASoC card identity. In particular, do
+    // not classify a USB card merely because its marketing name contains
+    // "Codec Zero" or "Raspberry Pi".
+    if (lowerCardId == "zero")
+    {
+        return lowerDriver == "rpi_codec_zero" ||
+               identity.find("rpi codec zero") != std::string::npos ||
+               identity.find("raspberry pi codec zero") != std::string::npos;
+    }
+    if (lowerCardId == "iqaudiocodec")
+    {
+        return lowerDriver == "iqaudiocodec" ||
+               identity.find("iqaudio codec") != std::string::npos ||
+               identity.find("iqaudiocodec") != std::string::npos;
+    }
+    return false;
+}
+
+namespace
+{
+    struct CodecZeroControl
+    {
+        const char *name;
+        snd_ctl_elem_type_t type;
+        long integerValue;
+        const char *enumValue;
+    };
+
+    constexpr CodecZeroControl IntegerControl(const char *name, long value)
+    {
+        return {name, SND_CTL_ELEM_TYPE_INTEGER, value, nullptr};
+    }
+
+    constexpr CodecZeroControl BooleanControl(const char *name, bool value)
+    {
+        return {name, SND_CTL_ELEM_TYPE_BOOLEAN, value ? 1L : 0L, nullptr};
+    }
+
+    constexpr CodecZeroControl EnumControl(const char *name, const char *value)
+    {
+        return {name, SND_CTL_ELEM_TYPE_ENUMERATED, 0, value};
+    }
+
+    // Values are the Raspberry Pi stereo AUX-IN / AUX-OUT reference profile.
+    // The raw volume values correspond to 0 dB AUX, +6 dB mixin PGA, 0 dB
+    // ADC/DAC and -8 dB headphone/AUX output.
+    constexpr CodecZeroControl CodecZeroCaptureControls[] = {
+        IntegerControl("Aux Volume", 53),
+        IntegerControl("Mixin PGA Volume", 7),
+        IntegerControl("ADC Volume", 112),
+        BooleanControl("Mic 1 Switch", false),
+        BooleanControl("Mic 2 Switch", false),
+        BooleanControl("Aux Switch", true),
+        BooleanControl("Mixin PGA Switch", true),
+        BooleanControl("ADC Switch", true),
+        BooleanControl("DMIC Switch", false),
+        BooleanControl("ALC Switch", false),
+        BooleanControl("ADC HPF Switch", false),
+        BooleanControl("ADC Voice Mode Switch", false),
+        BooleanControl("AUX Jack Switch", true),
+        BooleanControl("Aux ZC Switch", false),
+        BooleanControl("Mixin PGA ZC Switch", false),
+        BooleanControl("Aux Gain Ramping Switch", true),
+        BooleanControl("Mixin Gain Ramping Switch", false),
+        BooleanControl("ADC Gain Ramping Switch", false),
+        BooleanControl("Mixin Left Aux Left Switch", true),
+        BooleanControl("Mixin Left Mic 1 Switch", false),
+        BooleanControl("Mixin Left Mic 2 Switch", false),
+        BooleanControl("Mixin Left Mixin Right Switch", false),
+        BooleanControl("Mixin Right Aux Right Switch", true),
+        BooleanControl("Mixin Right Mic 1 Switch", false),
+        BooleanControl("Mixin Right Mic 2 Switch", false),
+        BooleanControl("Mixin Right Mixin Left Switch", false),
+        EnumControl("DAI Left Source MUX", "ADC Left"),
+        EnumControl("DAI Right Source MUX", "ADC Right"),
+    };
+
+    constexpr CodecZeroControl CodecZeroPlaybackControls[] = {
+        IntegerControl("DAC Volume", 112),
+        IntegerControl("Headphone Volume", 49),
+        BooleanControl("Headphone Switch", true),
+        BooleanControl("Lineout Switch", false),
+        BooleanControl("DAC Soft Mute Switch", false),
+        BooleanControl("DAC EQ Switch", false),
+        BooleanControl("DAC HPF Switch", false),
+        BooleanControl("DAC Voice Mode Switch", false),
+        BooleanControl("DAC NG Switch", false),
+        BooleanControl("DAC Mono Switch", false),
+        BooleanControl("DAC Invert Switch", false),
+        BooleanControl("HP Jack Switch", true),
+        BooleanControl("Headphone ZC Switch", false),
+        BooleanControl("DAC Gain Ramping Switch", false),
+        BooleanControl("Headphone Gain Ramping Switch", true),
+        EnumControl("DAC Left Source MUX", "DAI Input Left"),
+        EnumControl("DAC Right Source MUX", "DAI Input Right"),
+        BooleanControl("Mixout Left Aux Left Switch", false),
+        BooleanControl("Mixout Left Mixin Left Switch", false),
+        BooleanControl("Mixout Left Mixin Right Switch", false),
+        BooleanControl("Mixout Left DAC Left Switch", true),
+        BooleanControl("Mixout Left Aux Left Invert Switch", false),
+        BooleanControl("Mixout Left Mixin Left Invert Switch", false),
+        BooleanControl("Mixout Left Mixin Right Invert Switch", false),
+        BooleanControl("Mixout Right Aux Right Switch", false),
+        BooleanControl("Mixout Right Mixin Right Switch", false),
+        BooleanControl("Mixout Right Mixin Left Switch", false),
+        BooleanControl("Mixout Right DAC Right Switch", true),
+        BooleanControl("Mixout Right Aux Right Invert Switch", false),
+        BooleanControl("Mixout Right Mixin Right Invert Switch", false),
+        BooleanControl("Mixout Right Mixin Left Invert Switch", false),
+    };
+
+    constexpr CodecZeroControl CodecZeroSharedControls[] = {
+        EnumControl("Gain Ramping Rate", "nominal rate * 8"),
+    };
+
+    void ValidateCodecZeroControl(snd_ctl_t *ctl, const CodecZeroControl &control)
+    {
+        snd_ctl_elem_id_t *id = nullptr;
+        snd_ctl_elem_info_t *info = nullptr;
+        snd_ctl_elem_id_alloca(&id);
+        snd_ctl_elem_info_alloca(&info);
+        snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
+        snd_ctl_elem_id_set_name(id, control.name);
+        snd_ctl_elem_info_set_id(info, id);
+
+        int error = snd_ctl_elem_info(ctl, info);
+        if (error < 0)
+        {
+            throw PiPedalException(SS("Codec Zero mixer control '" << control.name
+                                      << "' is unavailable: " << snd_strerror(error)));
+        }
+        if (snd_ctl_elem_info_get_type(info) != control.type ||
+            snd_ctl_elem_info_get_count(info) == 0)
+        {
+            throw PiPedalException(SS("Codec Zero mixer control '" << control.name
+                                      << "' has an unexpected type or channel count."));
+        }
+        if (control.type == SND_CTL_ELEM_TYPE_INTEGER &&
+            (control.integerValue < snd_ctl_elem_info_get_min(info) ||
+             control.integerValue > snd_ctl_elem_info_get_max(info)))
+        {
+            throw PiPedalException(SS("Codec Zero mixer control '" << control.name
+                                      << "' cannot accept the reference value."));
+        }
+        if (control.type == SND_CTL_ELEM_TYPE_ENUMERATED)
+        {
+            bool found = false;
+            const unsigned int items = snd_ctl_elem_info_get_items(info);
+            for (unsigned int item = 0; item < items; ++item)
+            {
+                snd_ctl_elem_info_set_item(info, item);
+                if (snd_ctl_elem_info(ctl, info) < 0)
+                    break;
+                if (control.enumValue == std::string(snd_ctl_elem_info_get_item_name(info)))
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+            {
+                throw PiPedalException(SS("Codec Zero mixer control '" << control.name
+                                          << "' does not support value '" << control.enumValue << "'."));
+            }
+        }
+    }
+
+    void SetCodecZeroControl(snd_ctl_t *ctl, const CodecZeroControl &control)
+    {
+        snd_ctl_elem_id_t *id = nullptr;
+        snd_ctl_elem_info_t *info = nullptr;
+        snd_ctl_elem_value_t *value = nullptr;
+        snd_ctl_elem_id_alloca(&id);
+        snd_ctl_elem_info_alloca(&info);
+        snd_ctl_elem_value_alloca(&value);
+
+        snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
+        snd_ctl_elem_id_set_name(id, control.name);
+        snd_ctl_elem_info_set_id(info, id);
+
+        int error = snd_ctl_elem_info(ctl, info);
+        if (error < 0)
+        {
+            throw PiPedalException(SS("Codec Zero mixer control '" << control.name
+                                      << "' is unavailable: " << snd_strerror(error)));
+        }
+
+        const snd_ctl_elem_type_t actualType = snd_ctl_elem_info_get_type(info);
+        if (actualType != control.type)
+        {
+            throw PiPedalException(SS("Codec Zero mixer control '" << control.name
+                                      << "' has an unexpected type."));
+        }
+
+        snd_ctl_elem_value_set_id(value, id);
+        error = snd_ctl_elem_read(ctl, value);
+        if (error < 0)
+        {
+            throw PiPedalException(SS("Unable to read Codec Zero mixer control '" << control.name
+                                      << "': " << snd_strerror(error)));
+        }
+
+        const unsigned int count = snd_ctl_elem_info_get_count(info);
+        if (control.type == SND_CTL_ELEM_TYPE_ENUMERATED)
+        {
+            unsigned int selectedItem = snd_ctl_elem_info_get_items(info);
+            for (unsigned int item = 0; item < snd_ctl_elem_info_get_items(info); ++item)
+            {
+                snd_ctl_elem_info_set_item(info, item);
+                error = snd_ctl_elem_info(ctl, info);
+                if (error < 0)
+                {
+                    break;
+                }
+                if (control.enumValue == std::string(snd_ctl_elem_info_get_item_name(info)))
+                {
+                    selectedItem = item;
+                    break;
+                }
+            }
+            if (selectedItem == snd_ctl_elem_info_get_items(info))
+            {
+                throw PiPedalException(SS("Codec Zero mixer control '" << control.name
+                                          << "' does not support value '" << control.enumValue << "'."));
+            }
+            for (unsigned int index = 0; index < count; ++index)
+            {
+                snd_ctl_elem_value_set_enumerated(value, index, selectedItem);
+            }
+        }
+        else if (control.type == SND_CTL_ELEM_TYPE_BOOLEAN)
+        {
+            for (unsigned int index = 0; index < count; ++index)
+            {
+                snd_ctl_elem_value_set_boolean(value, index, control.integerValue);
+            }
+        }
+        else
+        {
+            for (unsigned int index = 0; index < count; ++index)
+            {
+                snd_ctl_elem_value_set_integer(value, index, control.integerValue);
+            }
+        }
+
+        error = snd_ctl_elem_write(ctl, value);
+        if (error < 0)
+        {
+            throw PiPedalException(SS("Unable to set Codec Zero mixer control '" << control.name
+                                      << "': " << snd_strerror(error)));
+        }
+    }
+
+    template <size_t N>
+    void ValidateCodecZeroControls(snd_ctl_t *ctl, const CodecZeroControl (&controls)[N])
+    {
+        for (const auto &control : controls)
+        {
+            ValidateCodecZeroControl(ctl, control);
+        }
+    }
+
+    template <size_t N>
+    void SetCodecZeroControls(snd_ctl_t *ctl, const CodecZeroControl (&controls)[N])
+    {
+        for (const auto &control : controls)
+        {
+            SetCodecZeroControl(ctl, control);
+        }
+    }
+}
+
+void pipedal::ConfigureAlsaDeviceForPiPedal(
+    const std::string &deviceId,
+    bool configureCapture,
+    bool configurePlayback)
+{
+    if ((!configureCapture && !configurePlayback) || deviceId.empty() || deviceId == "null")
+    {
+        return;
+    }
+
+    snd_ctl_t *ctl = nullptr;
+    int error = snd_ctl_open(&ctl, deviceId.c_str(), 0);
+    if (error < 0)
+    {
+        const std::string lowerDeviceId = ToLower(deviceId);
+        if (lowerDeviceId == "hw:zero" || lowerDeviceId == "hw:iqaudiocodec")
+        {
+            throw PiPedalException(SS("Unable to open Raspberry Pi Codec Zero mixer controls: "
+                                      << snd_strerror(error)));
+        }
+        // Opening the PCM will provide the normal user-facing error for missing
+        // or busy devices. Do not change behavior for ordinary ALSA devices.
+        return;
+    }
+    Finally closeCtl{[ctl]() { snd_ctl_close(ctl); }};
+
+    snd_ctl_card_info_t *cardInfo = nullptr;
+    snd_ctl_card_info_alloca(&cardInfo);
+    error = snd_ctl_card_info(ctl, cardInfo);
+    if (error < 0)
+    {
+        const std::string lowerDeviceId = ToLower(deviceId);
+        if (lowerDeviceId == "hw:zero" || lowerDeviceId == "hw:iqaudiocodec")
+        {
+            throw PiPedalException(SS("Unable to identify Raspberry Pi Codec Zero mixer controls: "
+                                      << snd_strerror(error)));
+        }
+        return;
+    }
+
+    if (!IsRaspberryPiCodecZero(
+            snd_ctl_card_info_get_id(cardInfo),
+            snd_ctl_card_info_get_driver(cardInfo),
+            snd_ctl_card_info_get_name(cardInfo),
+            snd_ctl_card_info_get_longname(cardInfo)))
+    {
+        return;
+    }
+
+    // Validate the complete requested profile before changing any control, so
+    // a driver-version mismatch cannot leave a half-applied routing setup.
+    if (configureCapture)
+        ValidateCodecZeroControls(ctl, CodecZeroCaptureControls);
+    if (configurePlayback)
+        ValidateCodecZeroControls(ctl, CodecZeroPlaybackControls);
+    ValidateCodecZeroControls(ctl, CodecZeroSharedControls);
+
+    if (configureCapture)
+    {
+        SetCodecZeroControls(ctl, CodecZeroCaptureControls);
+    }
+    if (configurePlayback)
+    {
+        SetCodecZeroControls(ctl, CodecZeroPlaybackControls);
+    }
+    SetCodecZeroControls(ctl, CodecZeroSharedControls);
+
+    Lv2Log::info(SS("Configured Raspberry Pi Codec Zero for "
+                    << (configureCapture ? "stereo AUX input" : "")
+                    << (configureCapture && configurePlayback ? " and " : "")
+                    << (configurePlayback ? "stereo AUX output" : "") << "."));
+}
 
 
 struct ProcAlsaDevice {
@@ -256,6 +621,15 @@ std::vector<AlsaDeviceInfo> PiPedalAlsaDevices::GetAlsaDevices()
             }
             info.name_ = name;
             info.longName_ = snd_ctl_card_info_get_longname(alsaInfo);
+            if (IsRaspberryPiCodecZero(
+                    snd_ctl_card_info_get_id(alsaInfo),
+                    snd_ctl_card_info_get_driver(alsaInfo),
+                    snd_ctl_card_info_get_name(alsaInfo),
+                    info.longName_))
+            {
+                info.deviceProfile_ = ALSA_DEVICE_PROFILE_CODEC_ZERO_AUX;
+                info.name_ = "Raspberry Pi Codec Zero (Stereo AUX)";
+            }
 
             // we can't read our own device if it's open so use data that gets
             // cached before we open audio devices.
@@ -706,6 +1080,7 @@ JSON_MAP_REFERENCE(AlsaDeviceInfo, cardId)
 JSON_MAP_REFERENCE(AlsaDeviceInfo, id)
 JSON_MAP_REFERENCE(AlsaDeviceInfo, name)
 JSON_MAP_REFERENCE(AlsaDeviceInfo, longName)
+JSON_MAP_REFERENCE(AlsaDeviceInfo, deviceProfile)
 JSON_MAP_REFERENCE(AlsaDeviceInfo, sampleRates)
 JSON_MAP_REFERENCE(AlsaDeviceInfo, minBufferSize)
 JSON_MAP_REFERENCE(AlsaDeviceInfo, maxBufferSize)

@@ -85,6 +85,7 @@ interface BufferSetting {
 
 // empty string used when no valid device is selected - the default.
 const INVALID_DEVICE_ID = "";
+const CODEC_ZERO_AUX_PROFILE = "rpi-codec-zero-aux";
 
 enum WarningDialogType {
     None,
@@ -387,6 +388,11 @@ const AudioDeviceDialog = withStyles(
                 return result;
             }
 
+            // Keep persisted labels synchronized when automatic selection or
+            // device discovery changes an id (including Codec Zero profiles).
+            result.alsaInputDeviceName = inDevice.shortDeviceName();
+            result.alsaOutputDeviceName = outDevice.shortDeviceName();
+
             let sampleRates = intersectArrays(inDevice.sampleRates, outDevice.sampleRates);
             if (sampleRates.length !== 0 && sampleRates.indexOf(result.sampleRate) === -1) {
                 let bestSr = sampleRates[0];
@@ -631,6 +637,9 @@ const AudioDeviceDialog = withStyles(
             let selectedInputDevice = this.getSelectedDevice(this.state.jackServerSettings.alsaInputDevice);
             let selectedOutputDevice = this.getSelectedDevice(this.state.jackServerSettings.alsaOutputDevice);
 
+            const codecZeroInput = selectedInputDevice?.deviceProfile === CODEC_ZERO_AUX_PROFILE;
+            const codecZeroOutput = selectedOutputDevice?.deviceProfile === CODEC_ZERO_AUX_PROFILE;
+
             const devicesSelected = (selectedInputDevice && selectedOutputDevice);
 
             let bufferSizes: number[] = devicesSelected ?
@@ -777,6 +786,14 @@ const AudioDeviceDialog = withStyles(
                                     JackHostStatus.getDisplayView("Status: ", this.state.jackHostStatus)
                                 }
                             </Typography>
+                            {(codecZeroInput || codecZeroOutput) && (
+                                <Typography display="block" variant="caption" style={{ textAlign: "left", marginTop: 8, marginLeft: 24, maxWidth: 480 }}
+                                    color="textSecondary">
+                                    Raspberry Pi Codec Zero: PiPedal will configure the stereo AUX
+                                    {codecZeroInput && codecZeroOutput ? " input and output" : codecZeroInput ? " input" : " output"}
+                                    {" routing automatically whenever audio starts. The initial analogue levels follow Raspberry Pi's reference profile. GPIO18-21 are reserved for I2S while the HAT is attached; I2C controls on GPIO2/3 remain supported."}
+                                </Typography>
+                            )}
 
                         </DialogContent>
 

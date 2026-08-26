@@ -1135,6 +1135,18 @@ namespace pipedal
             this->jackServerSettings = jackServerSettings;
             this->channelSelection = channelSelection;
 
+            std::string inputName = jackServerSettings.GetAlsaInputDevice();
+            std::string outputName = jackServerSettings.GetAlsaOutputDevice();
+            if (inputName == outputName)
+            {
+                ConfigureAlsaDeviceForPiPedal(inputName, true, true);
+            }
+            else
+            {
+                ConfigureAlsaDeviceForPiPedal(inputName, true, false);
+                ConfigureAlsaDeviceForPiPedal(outputName, false, true);
+            }
+
             open = true;
             try
             {

@@ -30,6 +30,7 @@ export default class AlsaDeviceInfo {
         this.id = input.id;
         this.name = input.name;
         this.longName = input.longName;
+        this.deviceProfile = input.deviceProfile ?? "";
         this.sampleRates = input.sampleRates as number[];
         this.minBufferSize = input.minBufferSize;
         this.maxBufferSize = input.maxBufferSize;
@@ -96,6 +97,7 @@ export default class AlsaDeviceInfo {
     id: string = "";
     name: string = "";
     longName: string = "";
+    deviceProfile: string = "";
     sampleRates: number[] = [];
     minBufferSize: number = 0;
     maxBufferSize: number = 0; 

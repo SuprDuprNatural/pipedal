@@ -561,3 +561,33 @@ TEST_CASE("OLED mode button cycles controls waveform and tuner", "[gpio]")
     REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Tuner);
     REQUIRE(manager->CycleDisplayMode() == GpioDisplayMode::Controls);
 }
+
+TEST_CASE("Reserved peripheral GPIO lines are not opened", "[Build][gpio]")
+{
+    GpioSettings settings;
+    settings.enabled_ = true;
+    GpioInputConfiguration input;
+    input.id_ = "conflicting-switch";
+    input.name_ = "Conflicting switch";
+    input.chip_ = "/dev/gpiochip0";
+    input.line_ = 20;
+    settings.inputs_.push_back(input);
+
+    GpioLineReservations reservations = {{
+        "/dev/gpiochip0", 20, "GPIO 20 is reserved for test hardware."}};
+    auto manager = GpioManager::Create();
+    manager->Configure(settings, reservations);
+
+    std::vector<GpioInputStatus> statuses;
+    for (int attempt = 0; attempt < 100; ++attempt)
+    {
+        statuses = manager->GetStatuses();
+        if (!statuses.empty() && !statuses[0].error_.empty())
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(statuses.size() == 1);
+    REQUIRE_FALSE(statuses[0].connected_);
+    REQUIRE(statuses[0].error_ == "GPIO 20 is reserved for test hardware.");
+    manager->Close();
+}

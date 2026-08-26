@@ -158,6 +158,7 @@ namespace pipedal
 
         GpioSettings gpioSettings;
         std::unique_ptr<GpioManager> gpioManager;
+        bool codecZeroPresent = false;
         int64_t gpioPendingPresetId = -1;
         enum class GpioNavigationLayer : int32_t
         {
@@ -208,6 +209,8 @@ namespace pipedal
         void ShowGpioBindingValue(const GpioBinding &binding, std::optional<float> value);
         void FireGpioSettingsChanged();
         void FireGpioInputStatusChanged(const GpioInputStatus &status);
+        void RefreshCodecZeroPresence();
+        void ConfigureGpioManager();
 
         std::unique_ptr<AvahiService> avahiService;
         uint16_t webPort;

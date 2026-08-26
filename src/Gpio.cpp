@@ -1470,6 +1470,26 @@ namespace
         return false;
     }
 
+    const GpioLineReservation *FindReservation(
+        const GpioInputConfiguration &input,
+        const GpioLineReservations &reservations)
+    {
+        if (input.inputType() == GpioInputType::Encoder ||
+            input.inputType() == GpioInputType::Navigation ||
+            input.inputType() == GpioInputType::Analog)
+        {
+            return nullptr;
+        }
+        for (const auto &reservation : reservations)
+        {
+            if (reservation.chip_ == input.chip_ && reservation.line_ == input.line_)
+            {
+                return &reservation;
+            }
+        }
+        return nullptr;
+    }
+
     class GpioManagerImpl final : public GpioManager
     {
     public:
@@ -1589,7 +1609,9 @@ namespace
             redrawRequested_.store(true);
         }
 
-        void Configure(const GpioSettings &settings) override
+        void Configure(
+            const GpioSettings &settings,
+            const GpioLineReservations &reservations) override
         {
             GpioManager::Validate(settings);
             Close();
@@ -1626,16 +1648,16 @@ namespace
             // sampled at roughly 40 Hz and the parameter encoders inherited its
             // stalls. Separate threads let each run at its own natural rate.
             inputThread_ = std::make_unique<std::jthread>(
-                [this, settings](std::stop_token stopToken)
+                [this, settings, reservations](std::stop_token stopToken)
                 {
-                    RunInputs(stopToken, settings, InputThreadRole::Controls);
+                    RunInputs(stopToken, settings, reservations, InputThreadRole::Controls);
                 });
             if (HasNavigationInput(settings))
             {
                 navigationThread_ = std::make_unique<std::jthread>(
-                    [this, settings](std::stop_token stopToken)
+                    [this, settings, reservations](std::stop_token stopToken)
                     {
-                        RunInputs(stopToken, settings, InputThreadRole::Navigation);
+                        RunInputs(stopToken, settings, reservations, InputThreadRole::Navigation);
                     });
             }
             if (settings.display_.enabled_ || settings.ledMatrix_.enabled_)
@@ -2207,6 +2229,7 @@ namespace
         void RunInputs(
             std::stop_token stopToken,
             const GpioSettings &settings,
+            const GpioLineReservations &reservations,
             InputThreadRole role)
         {
             std::vector<std::unique_ptr<RuntimeInput>> runtimes;
@@ -2217,6 +2240,16 @@ namespace
                     continue;
                 }
                 auto runtime = std::make_unique<RuntimeInput>(input);
+                if (const auto *reservation = FindReservation(input, reservations))
+                {
+                    runtime->available = false;
+                    runtime->status.error_ = reservation->reason_;
+                    Lv2Log::warning(SS("Not opening GPIO input '" << input.name_
+                                       << "': " << reservation->reason_));
+                    UpdateStatus(*runtime, true);
+                    runtimes.push_back(std::move(runtime));
+                    continue;
+                }
                 if (input.inputType() == GpioInputType::Navigation)
                 {
 #if defined(__linux__)
