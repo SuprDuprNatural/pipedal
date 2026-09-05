@@ -18,7 +18,7 @@ Stereo AUX IN -> input mixer -> ADC -> I2S -> PiPedal
 PiPedal -> I2S -> DAC -> output mixer -> stereo AUX OUT
 ```
 
-The initial analogue levels follow Raspberry Pi's reference stereo-AUX profile: AUX input at 0 dB, mixin PGA at +6 dB, ADC and DAC at 0 dB, and AUX/headphone output at -8 dB. DSP features such as ALC, EQ, noise gate, mono mixing and filtering are disabled so that PiPedal receives and produces an unprocessed stereo signal.
+By default, AUX input, mixin PGA, ADC and DAC are all at 0 dB, while AUX/headphone output is at -8 dB. This is 6 dB lower at the input than Raspberry Pi's example stereo-AUX profile, leaving useful headroom for instruments that approach the AUX input's nominal level. The ADC's stereo DC-blocking filter is enabled at its lowest `Fs/24000` cutoff (about 1.8 Hz at 44.1 kHz or 2 Hz at 48 kHz). This removes analogue-path DC offset without relying on a fixed calibration value. Other DSP features such as ALC, EQ, noise gate, voice filtering and mono mixing are disabled so that PiPedal receives and produces an otherwise unprocessed stereo signal.
 
 The routing is applied only to a detected Codec Zero. Selecting a USB interface follows the normal ALSA path and does not alter that device's mixer controls. PiPedal also supports using the Codec Zero for only one direction and another interface for the other, although using one clocked device for both directions is normally more reliable.
 
@@ -64,7 +64,11 @@ Do not add the overlay when EEPROM auto-detection is already working. Older blac
 
 ## Levels and guitar input
 
+**Settings -> Audio Device Settings -> Codec Zero input gain** adjusts both AUX input channels from **-24 to +15 dB**, in 1.5 dB steps. Start with **-6 dB** for a hotter input. The setting is saved and reapplied whenever audio starts; applying it briefly restarts audio without rebooting the Pi. Existing configurations default to 0 dB. The selector appears only when Codec Zero is selected for input and does not affect USB interfaces. This adjusts analogue AUX gain before the ADC, rather than reducing the already-digitised signal.
+
 AUX IN and AUX OUT are nominally 1 Vrms. AUX IN is a line-level input rather than a high-impedance guitar input, so place a proper buffer in front of it. A buffered tuner output is suitable. If hard playing clips the converter, reduce the signal before AUX IN; a compressor after the Codec Zero cannot undo ADC clipping. The -8 dB reference output setting leaves useful headroom, and downstream make-up gain can compensate when necessary.
+
+When checking DC offset, discard the first second after audio starts so that the DC-blocking filter has settled. On the Raspberry Pi, `amixer -c Zero cget name='ADC HPF Switch'` should report `on`, and `amixer -c Zero cget name='ADC HPF Cutoff'` should report `Fs/24000` while PiPedal is using the Codec Zero.
 
 ## Kernel startup-delay limitation
 

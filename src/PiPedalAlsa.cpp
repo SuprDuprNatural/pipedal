@@ -23,6 +23,7 @@
 #include "alsa/asoundlib.h"
 #include "Lv2Log.hpp"
 #include <mutex>
+#include <cmath>
 #include <algorithm>
 #include "Finally.hpp"
 #include "PiPedalException.hpp"
@@ -121,12 +122,14 @@ namespace
         return {name, SND_CTL_ELEM_TYPE_ENUMERATED, 0, value};
     }
 
-    // Values are the Raspberry Pi stereo AUX-IN / AUX-OUT reference profile.
-    // The raw volume values correspond to 0 dB AUX, +6 dB mixin PGA, 0 dB
+    // Values use the Raspberry Pi stereo AUX-IN / AUX-OUT routing with a
+    // unity-gain input path. The ADC's lowest-frequency audio HPF is enabled
+    // as a DC blocker; unlike a fixed sample offset, it also follows analogue
+    // offset changes between channels, boards, gain settings and temperature.
+    // The raw volume values correspond to 0 dB AUX, 0 dB mixin PGA, 0 dB
     // ADC/DAC and -8 dB headphone/AUX output.
     constexpr CodecZeroControl CodecZeroCaptureControls[] = {
-        IntegerControl("Aux Volume", 53),
-        IntegerControl("Mixin PGA Volume", 7),
+        IntegerControl("Mixin PGA Volume", 3),
         IntegerControl("ADC Volume", 112),
         BooleanControl("Mic 1 Switch", false),
         BooleanControl("Mic 2 Switch", false),
@@ -135,7 +138,8 @@ namespace
         BooleanControl("ADC Switch", true),
         BooleanControl("DMIC Switch", false),
         BooleanControl("ALC Switch", false),
-        BooleanControl("ADC HPF Switch", false),
+        BooleanControl("ADC HPF Switch", true),
+        EnumControl("ADC HPF Cutoff", "Fs/24000"),
         BooleanControl("ADC Voice Mode Switch", false),
         BooleanControl("AUX Jack Switch", true),
         BooleanControl("Aux ZC Switch", false),
@@ -353,7 +357,8 @@ namespace
 void pipedal::ConfigureAlsaDeviceForPiPedal(
     const std::string &deviceId,
     bool configureCapture,
-    bool configurePlayback)
+    bool configurePlayback,
+    double codecZeroInputGainDb)
 {
     if ((!configureCapture && !configurePlayback) || deviceId.empty() || deviceId == "null")
     {
@@ -399,6 +404,19 @@ void pipedal::ConfigureAlsaDeviceForPiPedal(
         return;
     }
 
+    // AUX volume is analogue gain before the ADC: raw 53 = 0 dB,
+    // with 1.5 dB steps. Validate before changing any mixer control.
+    if (configureCapture && (!std::isfinite(codecZeroInputGainDb) ||
+        codecZeroInputGainDb < -24 || codecZeroInputGainDb > 15 ||
+        std::abs(codecZeroInputGainDb / 1.5 - std::round(codecZeroInputGainDb / 1.5)) > 1e-6))
+    {
+        throw PiPedalException("Codec Zero input gain must be -24 to +15 dB in 1.5 dB steps.");
+    }
+    const auto auxGain = IntegerControl("Aux Volume",
+        configureCapture ? 53 + static_cast<long>(std::round(codecZeroInputGainDb / 1.5)) : 53);
+    if (configureCapture)
+        ValidateCodecZeroControl(ctl, auxGain);
+
     // Validate the complete requested profile before changing any control, so
     // a driver-version mismatch cannot leave a half-applied routing setup.
     if (configureCapture)
@@ -409,6 +427,7 @@ void pipedal::ConfigureAlsaDeviceForPiPedal(
 
     if (configureCapture)
     {
+        SetCodecZeroControl(ctl, auxGain);
         SetCodecZeroControls(ctl, CodecZeroCaptureControls);
     }
     if (configurePlayback)

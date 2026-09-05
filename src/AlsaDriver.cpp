@@ -1139,11 +1139,11 @@ namespace pipedal
             std::string outputName = jackServerSettings.GetAlsaOutputDevice();
             if (inputName == outputName)
             {
-                ConfigureAlsaDeviceForPiPedal(inputName, true, true);
+                ConfigureAlsaDeviceForPiPedal(inputName, true, true, jackServerSettings.GetCodecZeroInputGainDb());
             }
             else
             {
-                ConfigureAlsaDeviceForPiPedal(inputName, true, false);
+                ConfigureAlsaDeviceForPiPedal(inputName, true, false, jackServerSettings.GetCodecZeroInputGainDb());
                 ConfigureAlsaDeviceForPiPedal(outputName, false, true);
             }
 

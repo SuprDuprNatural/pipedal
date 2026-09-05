@@ -61,7 +61,8 @@ namespace pipedal {
     void ConfigureAlsaDeviceForPiPedal(
         const std::string &deviceId,
         bool configureCapture,
-        bool configurePlayback);
+        bool configurePlayback,
+        double codecZeroInputGainDb = 0);
 
     class AlsaMidiDeviceInfo {
     public:

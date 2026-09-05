@@ -714,6 +714,30 @@ const AudioDeviceDialog = withStyles(
                                     </IconButtonEx>
                                 </div>
                             </div><div>
+                                {selectedInputDevice?.deviceProfile === "rpi-codec-zero-aux" && (
+                                    <FormControl variant="standard" className={classes.formControl}>
+                                        <InputLabel shrink id="codec-zero-gain-label">Codec Zero input gain</InputLabel>
+                                        <Select variant="standard" labelId="codec-zero-gain-label"
+                                            id="codec-zero-input-gain"
+                                            value={this.state.jackServerSettings.codecZeroInputGainDb}
+                                            onChange={e => {
+                                                const settings = this.state.jackServerSettings.clone();
+                                                settings.codecZeroInputGainDb = Number(e.target.value);
+                                                settings.valid = false;
+                                                this.setState({ jackServerSettings: settings,
+                                                    okEnabled: isOkEnabled(settings, this.state.alsaDevices) });
+                                            }}>
+                                            {Array.from({ length: 27 }, (_, i) => -24 + i * 1.5).map(gain => (
+                                                <MenuItem key={gain} value={gain}>
+                                                    {gain > 0 ? "+" : ""}{gain} dB
+                                                </MenuItem>
+                                            ))}
+                                        </Select>
+                                        <Typography variant="caption" style={{ maxWidth: 280 }}>
+                                            Analogue AUX input gain. Lower it for hot signals. Applying briefly restarts audio.
+                                        </Typography>
+                                    </FormControl>
+                                )}
                                 <FormControl variant="standard" className={classes.formControl}>
                                     <InputLabel shrink className={classes.inputLabel} htmlFor="jsd_sampleRate">Sample rate</InputLabel>
                                     <Select variant="standard"
@@ -791,7 +815,7 @@ const AudioDeviceDialog = withStyles(
                                     color="textSecondary">
                                     Raspberry Pi Codec Zero: PiPedal will configure the stereo AUX
                                     {codecZeroInput && codecZeroOutput ? " input and output" : codecZeroInput ? " input" : " output"}
-                                    {" routing automatically whenever audio starts. The initial analogue levels follow Raspberry Pi's reference profile. GPIO18-21 are reserved for I2S while the HAT is attached; I2C controls on GPIO2/3 remain supported."}
+                                    {" routing automatically whenever audio starts. The selected input gain is saved and reapplied on restart. GPIO18-21 are reserved for I2S while the HAT is attached; I2C controls on GPIO2/3 remain supported."}
                                 </Typography>
                             )}
 

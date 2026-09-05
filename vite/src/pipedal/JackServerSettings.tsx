@@ -32,6 +32,7 @@ export default class JackServerSettings {
         this.sampleRate = input.sampleRate;
         this.bufferSize = input.bufferSize;
         this.numberOfBuffers = input.numberOfBuffers;
+        this.codecZeroInputGainDb = input.codecZeroInputGainDb ?? 0;
         return this;
     }
     // constructor(alsaDevice: string, sampleRate?: number, bufferSize?: number, numberOfBuffers?: number)
@@ -57,6 +58,7 @@ export default class JackServerSettings {
     sampleRate = 48000;
     bufferSize = 64;
     numberOfBuffers = 3;
+    codecZeroInputGainDb = 0;
 
     /**
      * Configure this instance to use the dummy audio device. This mirrors the

@@ -40,6 +40,7 @@ namespace pipedal
         uint64_t sampleRate_ = 0;
         uint32_t bufferSize_ = 64;
         uint32_t numberOfBuffers_ = 3;
+        double codecZeroInputGainDb_ = 0; // Analogue AUX gain; legacy settings retain unity.
 
     public:
         JackServerSettings();
@@ -61,6 +62,8 @@ namespace pipedal
             FixUpDeviceNames();
         }
         
+        double GetCodecZeroInputGainDb() const { return codecZeroInputGainDb_; }
+
         uint64_t GetSampleRate() const { return sampleRate_; }
 
         uint32_t GetBufferSize() const { return bufferSize_; }
@@ -109,7 +112,8 @@ namespace pipedal
                    this->alsaDevice_       == other.alsaDevice_ &&
                    this->sampleRate_       == other.sampleRate_ &&
                    this->bufferSize_       == other.bufferSize_ &&
-                   this->numberOfBuffers_  == other.numberOfBuffers_;
+                   this->numberOfBuffers_  == other.numberOfBuffers_ &&
+                   this->codecZeroInputGainDb_ == other.codecZeroInputGainDb_;
         }
         bool FixUpDeviceNames();
 
