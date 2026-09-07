@@ -36,11 +36,14 @@ import ToobPlayerFactory from './ToobPlayerView';
 import ToobNamViewFactory from './ToobNamView';
 import ToobParametericEqViewFactory from './ToobParametricEqView';
 import {ToobParametricEqViewFactoryStereo} from './ToobParametricEqView';
-import { SuprCompressorViewFactory, SuprVuViewFactory, SuprOctaveViewFactory, SuprOctavePlusViewFactory, SuprEnvFilterViewFactory, SuprTunerViewFactory, SuprTransientViewFactory, SuprChorusViewFactory, SuprSansViewFactory, SuprFuzzViewFactory, SuprBandViewFactory, SuprClackViewFactory } from './SuprPedalViews';
+import { SuprCompressorViewFactory, SuprVuViewFactory, SuprOctaveViewFactory, SuprOctavePlusViewFactory, SuprEnvFilterViewFactory, SuprTunerViewFactory, SuprTransientViewFactory, SuprChorusViewFactory, SuprSansViewFactory, SuprFuzzViewFactory, SuprBandViewFactory, SuprClackViewFactory, SuprForgeViewFactory, SuprEchoViewFactory, SuprSpaceViewFactory } from './SuprPedalViews';
+import { SuprShapeViewFactory, SuprPhaseViewFactory } from './SuprPedalViews';
 import { SuprNamViewFactory } from './SuprNamView';
 
 
 let pluginFactories: IControlViewFactory[] = [
+    new SuprShapeViewFactory(),
+    new SuprPhaseViewFactory(),
     new SuprNamViewFactory(),
     new SuprCompressorViewFactory(),
     new SuprVuViewFactory(),
@@ -54,6 +57,9 @@ let pluginFactories: IControlViewFactory[] = [
     new SuprFuzzViewFactory(),
     new SuprBandViewFactory(),
     new SuprClackViewFactory(),
+    new SuprForgeViewFactory(),
+    new SuprEchoViewFactory(),
+    new SuprSpaceViewFactory(),
     new GxTunerViewFactory(),
     new ToobPowerstage2ViewFactory(),
     new ToobWarmerViewFactory(),

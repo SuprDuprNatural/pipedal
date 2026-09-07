@@ -31,6 +31,7 @@
 #include "OptionsFeature.hpp"
 
 #include "IEffect.hpp"
+#include "LatencyCompensation.hpp"
 #include "Worker.hpp"
 #include "lv2/patch/patch.h"
 #include "lv2/log/log.h"
@@ -106,6 +107,10 @@ namespace pipedal
         std::vector<float> defaultInputControlValues;
         std::vector<bool> isInputTriggerControlPort;;
         int bypassControlIndex = -1;
+        int latencyControlIndex = -1;
+        CompensationDelay bypassDelay;
+        std::vector<std::vector<float>> bypassBuffers;
+        std::vector<float*> bypassBufferPointers;
 
         virtual std::string GetUri() const { return info->uri(); }
 
@@ -192,6 +197,8 @@ namespace pipedal
 
 
         int GetBypassControlPort() const { return bypassControlIndex; }
+        uint32_t GetLatencySamples() const override;
+        bool IsLatencyCompensationLimited() const override { return bypassDelay.Limited(); }
 
         void ResetInputAtomBuffer(char*data);
         void ResetOutputAtomBuffer(char*data);

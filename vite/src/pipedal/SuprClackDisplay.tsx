@@ -14,12 +14,13 @@
 //
 // All three fill leftward in the cool colour, because all three are cuts
 // — the house language reserves supr orange for gain ADDED, and nothing
-// here ever adds any. One shared 24 dB span so the three are directly
-// comparable; the expander can exceed it, and a bar that is simply full
-// is the correct reading of "closed".
+// here ever adds any. Clack and Scrape share a 24 dB reduction span. Gate
+// is different: its 41 dB span includes the infinity endpoint, so its bar
+// is empty only when open and full only when actually closed.
 //
-// All three ports are peak-held in the DSP (120 ms decay) precisely so a
-// display polling at 30 Hz cannot miss the few-millisecond clack events.
+// Clack and Scrape are peak-held in the DSP so polling cannot miss short
+// events. Gate is deliberately neither held nor animated: momentum would
+// make the meter disagree with the state it is meant to report.
 //
 // MIT license, (c) 2026 SuprPedals contributors.
 
@@ -41,14 +42,16 @@ const LABEL_W = 46;
 const BAR_W = 244;
 const BAR_H = 8;
 const ROW_GAP = 5;
-const SPAN_DB = 24; // full deflection, shared by all three
+const SPAN_DB = 24; // Clack/Scrape full deflection
 
-const RATE = 1.0 / 30;
+const EVENT_RATE = 1.0 / 30;
+const GATE_RATE = 1.0 / 60;
 
-const ROWS: { port: string; label: string }[] = [
-    { port: "clackgr", label: "CLACK" },
-    { port: "scrapegr", label: "SCRAPE" },
-    { port: "expgr", label: "GATE" },
+const ROWS: { port: string; label: string; rate: number; span?: number;
+    animate?: boolean }[] = [
+    { port: "clackgr", label: "CLACK", rate: EVENT_RATE },
+    { port: "scrapegr", label: "SCRAPE", rate: EVENT_RATE },
+    { port: "expgr", label: "GATE", rate: GATE_RATE, span: 41, animate: false },
 ];
 
 interface SuprClackDisplayProps extends WithStyles<typeof styles> {
@@ -80,7 +83,7 @@ const SuprClackDisplay =
                 this.subscribedInstanceId = this.props.instanceId;
                 ROWS.forEach((row, i) => {
                     this.monitorHandles.push(
-                        this.model.monitorPort(this.props.instanceId, row.port, RATE,
+                        this.model.monitorPort(this.props.instanceId, row.port, row.rate,
                             (value: number) => {
                                 this.setState((s) => {
                                     const db = s.db.slice();
@@ -135,9 +138,10 @@ const SuprClackDisplay =
                         gap: ROW_GAP
                     }}>
                         {ROWS.map((row, i) => {
-                            // The ports report reduction as <= 0 dB.
-                            const amt = Math.min(-this.state.db[i], SPAN_DB);
-                            const fill = Math.max(amt, 0) / SPAN_DB * BAR_W;
+                            const span = row.span ?? SPAN_DB;
+                            const fill = Math.max(0,
+                                Math.min(-this.state.db[i], span))
+                                / span * BAR_W;
                             return (
                                 <div key={row.port} style={{
                                     display: "flex", flexFlow: "row nowrap",
@@ -166,7 +170,8 @@ const SuprClackDisplay =
                                             position: "absolute", top: 0, right: 0,
                                             width: fill, height: BAR_H,
                                             background: cut,
-                                            transition: "width 90ms linear"
+                                            transition: row.animate === false
+                                                ? "none" : "width 90ms linear"
                                         }} />
                                     </div>
                                 </div>

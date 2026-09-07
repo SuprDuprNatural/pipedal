@@ -19,7 +19,10 @@ import SuprTunerDisplay from './SuprTunerDisplay';
 import SuprTransientDisplay from './SuprTransientDisplay';
 import SuprChorusDisplay from './SuprChorusDisplay';
 import SuprClackDisplay from './SuprClackDisplay';
+import SuprLearnActions from './SuprLearnActions';
 import SuprDotMeter from './SuprDotMeter';
+import SuprForgeDisplay from './SuprForgeDisplay';
+import SuprEchoActions from './SuprEchoActions';
 import { PanelColumn, SuprPanelUnit, mapControlNodes } from './SuprPanel';
 
 const SUPR_COMPRESSOR_URI = "https://suprduprnatural.github.io/supr-pedals/compressor";
@@ -72,45 +75,35 @@ const VU_TICKS: MeterTick[] = [
     { db: 3, label: "+3", red: true },
 ];
 
-// The compressor face is one uninterrupted console section: the four timing
-// controls sit directly under the GR meter, while the three setup/output
-// controls form a balanced stack at its right.
+// Separate columns let the meter/timing and setup controls wrap on phones.
 const SuprCompressorView = makePanelView((ctx) => [
     {
         sections: [{
             noLabelSlot: true,
-            rowAlign: "stretch",
             rowGap: 8,
-            rows: [[
-                {
-                    panelGroup: "column",
-                    items: [
-                        (
-                            <SuprMeterControl key="supr_gr_meter"
-                                instanceId={ctx.instanceId}
-                                needles={[{ port: "gr", color: "#b03030" }]}
-                                ticks={GR_TICKS}
-                                minDb={-30} maxDb={0} gamma={2.4}
-                                label="GAIN REDUCTION"
-                                width={360} height={160} />
-                        ),
-                        {
-                            panelGroup: "row",
-                            items: ["threshold", "ratio", "attack", "release"]
-                        }
-                    ]
-                },
-                {
-                    panelGroup: "column",
-                    items: [
-                        { supr: "makeup", step: 3, showReadout: true, showPointer: true },
-                        { supr: "blend", marks: "home" },
-                        { supr: "schpf", marks: "home" }
-                    ],
-                    justify: "space-evenly",
-                    stretch: true
-                }
-            ]]
+            rows: [
+                [<SuprMeterControl key="supr_gr_meter"
+                    instanceId={ctx.instanceId}
+                    needles={[{ port: "gr", color: "#b03030" }]}
+                    ticks={GR_TICKS}
+                    minDb={-30} maxDb={0} gamma={2.4}
+                    label="GAIN REDUCTION"
+                    width={260} height={105} />],
+                ["threshold", "ratio"],
+                ["attack", "release"]
+            ]
+        }]
+    },
+    {
+        sections: [{
+            noLabelSlot: true,
+            spreadRows: true,
+            rows: [
+                [{ supr: "makeup", step: 3, showReadout: true, showPointer: true }],
+                [{ supr: "blend", marks: "home" }],
+                [{ supr: "schpf", marks: "home" }],
+                ["detector"]
+            ]
         }]
     },
 ]);
@@ -341,7 +334,7 @@ const SuprSansView = makePanelView(() => [
     },
 ]);
 
-const SuprFuzzView = makePanelView(() => [
+const SuprFuzzView = makePanelView((ctx) => [
     {
         sections: [{
             noLabelSlot: true,
@@ -351,7 +344,9 @@ const SuprFuzzView = makePanelView(() => [
                     { supr: "tone", marks: "endpoints" }
                 ],
                 [{ supr: "gate" }, { supr: "blend", marks: "endpoints" }],
-                [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+                [{ supr: "level", step: 3, showReadout: true, showPointer: true }],
+                ["match_mode", "held_gain"],
+                [<SuprLearnActions key="learn" instanceId={ctx.instanceId} kind="fuzz" />]
             ]
         }]
     }
@@ -527,11 +522,11 @@ const SuprTransientView = makePanelView((ctx) => ({
 // and the squeak duck, so they sit under them rather than in a section of
 // their own.
 //
-// Delta gets an unlabelled section of its own beside the expander rather
+// Delta gets an unlabelled section of its own beside the gate rather
 // than a row underneath it. It belongs to no section — it is a monitor,
 // and it changes what you hear rather than what the pedal does — so
 // filing it under any of the three would be a small lie about what it
-// is. Unlabelled and tucked into the space the expander's three knobs
+// is. Unlabelled and tucked into the space the gate's three knobs
 // leave, it costs no height at all.
 //
 // There is no output trim. This pedal only ever takes away, and by
@@ -539,8 +534,9 @@ const SuprTransientView = makePanelView((ctx) => ({
 // opinion about a level the pedal never set.
 const SuprClackView = makePanelView((ctx) => ({
     header: (
-        <SuprClackDisplay key="supr_clack_display"
+        <div><SuprClackDisplay key="supr_clack_display"
             instanceId={ctx.instanceId} />
+            <SuprLearnActions instanceId={ctx.instanceId} kind="clack" /></div>
     ),
     columns: [
         {
@@ -555,7 +551,7 @@ const SuprClackView = makePanelView((ctx) => ({
                     ]
                 },
                 {
-                    label: "Expander",
+                    label: "Gate",
                     rows: [
                         [
                             { supr: "thresh", marks: "home" },
@@ -717,5 +713,111 @@ export class SuprClackViewFactory implements IControlViewFactory {
     uri: string = SUPR_CLACK_URI;
     Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
         return (<SuprClackView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+
+// A compact modern drive: foundation, voice, then output; meters come from DSP.
+const SuprForgeView = makePanelView((ctx) => ({
+    header: (<SuprForgeDisplay key="forge_display" instanceId={ctx.instanceId} />),
+    columns: [
+        { sections: [{ label: "Foundation", rows: [
+            [{ supr: "weight", marks: "home" }],
+            [{ supr: "tight", marks: "home" }],
+            [{ supr: "comp", marks: "fill" }]
+        ] }] },
+        { sections: [{ label: "Forge", rows: [
+            [{ supr: "drive", marks: "fill" }],
+            [{ supr: "bite", marks: "home" }],
+            [{ supr: "fizz", marks: "home" }]
+        ] }] },
+        { sections: [{ label: "Output", rows: [
+            [{ panelGroup: "row", align: "flex-start", items: [
+                { supr: "level", step: 3, showReadout: true, showPointer: true },
+                // Match the continuous knobs' 100px slot so Gate stays aligned.
+                (<div key="forge_level_slot" aria-hidden="true" style={{ width: 0, height: 100 }} />)
+            ] }],
+            [{ supr: "gate", marks: "home" }],
+            [(<SuprForgeDisplay key="forge_gate" instanceId={ctx.instanceId} variant="gate" />)]
+        ] }] }
+    ]
+}));
+
+export class SuprForgeViewFactory implements IControlViewFactory {
+    uri: string = "https://suprduprnatural.github.io/supr-pedals/forge";
+    Create(model: PiPedalModel, pedalboardItem: PedalboardItem): React.ReactNode {
+        return (<SuprForgeView instanceId={pedalboardItem.instanceId} item={pedalboardItem} />);
+    }
+}
+
+// Time effects keep the undelayed dry path at unity. Send controls wet excitation.
+const SuprEchoView = makePanelView((ctx) => ({
+    columns: [
+        { sections: [{ label: "Repeats", rows: [["time"], ["feedback"],
+            [<SuprEchoActions key="echo_timing" instanceId={ctx.instanceId} division={ctx.controlValues.division ?? 0} />]] }] },
+        { sections: [{ label: "Colour", rows: [["tone"], ["lowcut"], ["recovery"]] }] },
+        { sections: [{ label: "Return", rows: [["mix"], ["duck"], ["send"]] }] }
+    ]
+}));
+const SuprSpaceView = makePanelView(() => ({
+    columns: [
+        { sections: [{ label: "Space", rows: [["decay"], ["predelay"]] }] },
+        { sections: [{ label: "Colour", rows: [["tone"], ["lowcut"], ["recovery"]] }] },
+        { sections: [{ label: "Return", rows: [["mix"], ["duck"], ["send"]] }] }
+    ]
+}));
+export class SuprEchoViewFactory implements IControlViewFactory {
+    uri = "https://suprduprnatural.github.io/supr-pedals/echo";
+    Create(model: PiPedalModel, item: PedalboardItem): React.ReactNode {
+        return <SuprEchoView instanceId={item.instanceId} item={item} />;
+    }
+}
+export class SuprSpaceViewFactory implements IControlViewFactory {
+    uri = "https://suprduprnatural.github.io/supr-pedals/space";
+    Create(model: PiPedalModel, item: PedalboardItem): React.ReactNode {
+        return <SuprSpaceView instanceId={item.instanceId} item={item} />;
+    }
+}
+
+// Session 2 additions. Basic EQ is separate from optional input-keyed cuts.
+const shapeMeter = (instanceId: number, port: string, label: string) => (
+    <SuprMeterControl key={port} instanceId={instanceId}
+        needles={[{ port, color: "#6fa7d8" }]}
+        ticks={[{ db: -12, label: "12" }, { db: -6, label: "6" }, { db: 0, label: "0" }]}
+        minDb={-12} maxDb={0} gamma={1} label={label} width={164} height={68} />
+);
+const SuprShapeView = makePanelView((ctx) => ({
+    columns: [
+        { sections: [{ label: "Limits / output", rows: [["hpf"], ["lpf"],
+            [{ supr: "level", step: 3, showReadout: true, showPointer: true }]] }] },
+        { sections: [{ label: "Shelves", rows: [["bass"], ["treble"]] }] },
+        { sections: [{ label: "Mid", rows: [["mid_freq"], ["mid_gain"], ["mid_q"]] }] },
+        { sections: [{ label: "Dynamic boom", rows: [
+            [shapeMeter(ctx.instanceId, "boom_gr", "BOOM REDUCTION")],
+            ["boom_freq"], ["boom"], ["threshold"]
+        ] }] },
+        { sections: [{ label: "Dynamic harsh", rows: [
+            [shapeMeter(ctx.instanceId, "harsh_gr", "HARSH REDUCTION")],
+            ["harsh_freq"], ["harsh"], ["release"]
+        ] }] }
+    ]
+}));
+const SuprPhaseView = makePanelView(() => ({
+    columns: [
+        { sections: [{ label: "Motion", rows: [["rate"], ["depth"], ["centre"]] }] },
+        { sections: [{ label: "Voice", rows: [["feedback"], ["mix"], ["protect"]] }] },
+        { sections: [{ label: "Envelope", rows: [["mode"], ["sensitivity"]] }] }
+    ]
+}));
+export class SuprShapeViewFactory implements IControlViewFactory {
+    uri = "https://suprduprnatural.github.io/supr-pedals/shape";
+    Create(model: PiPedalModel, item: PedalboardItem): React.ReactNode {
+        return <SuprShapeView instanceId={item.instanceId} item={item} />;
+    }
+}
+export class SuprPhaseViewFactory implements IControlViewFactory {
+    uri = "https://suprduprnatural.github.io/supr-pedals/phase";
+    Create(model: PiPedalModel, item: PedalboardItem): React.ReactNode {
+        return <SuprPhaseView instanceId={item.instanceId} item={item} />;
     }
 }

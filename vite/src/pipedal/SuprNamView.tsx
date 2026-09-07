@@ -142,6 +142,8 @@ interface SuprNamFlowProps {
     routing: number;
     loaded: boolean[];
     threaded: boolean;
+    computePercent?: number;
+    latency?: number;
 }
 
 function SuprNamFlow(props: SuprNamFlowProps) {
@@ -213,7 +215,11 @@ function SuprNamFlow(props: SuprNamFlowProps) {
                 {elements}
             </svg>
             <Typography variant="caption" style={{ opacity: 0.6, marginTop: 2 }}>
-                {props.threaded ? "threaded · 1 block latency" : "inline · no latency"}
+                {props.threaded ? "threaded" : "inline"} · {props.latency ?? 0} samples
+                <br />
+                {plan.filter(stage => stage.some(slot => props.loaded[slot])).length} sequential stages
+                {props.threaded && ` · up to ${Math.max(1, ...plan.map(stage => stage.filter(slot => props.loaded[slot]).length))} models at once`}
+                {props.computePercent !== undefined && <><br />{props.computePercent.toFixed(1)}% of block time · last job</>}
             </Typography>
         </div>
     );
@@ -235,6 +241,9 @@ interface SuprNamViewState {
     filtersOpen: boolean[];
     slotInfo: SlotInfo[];
     overload: boolean;
+    computePercent?: number;
+    latency?: number;
+    activeThreaded?: boolean;
     revision: number;
 }
 
@@ -274,7 +283,10 @@ const SuprNamView =
                     const values = atomData.value as number[];
                     this.setState({
                         slotInfo: decodeModelInfo(values),
-                        overload: values.length > INFO_OVERLOAD && values[INFO_OVERLOAD] !== 0
+                        overload: values.length > INFO_OVERLOAD && values[INFO_OVERLOAD] !== 0,
+                        computePercent: values.length >= 27 ? values[24] : undefined,
+                        latency: values.length >= 27 ? values[25] : undefined,
+                        activeThreaded: values.length >= 27 ? values[26] !== 0 : undefined
                     });
                 }
             }
@@ -447,7 +459,8 @@ const SuprNamView =
                 // not — a dead knob is worse than no knob.
                 let routingRows: PanelSection["rows"] = [
                     [(<SuprNamFlow key="flow" routing={routing} loaded={loaded}
-                        threaded={threaded} />)],
+                        threaded={this.state.activeThreaded ?? threaded}
+                        computePercent={this.state.computePercent} latency={this.state.latency} />)],
                     [{ supr: "routing", wide: true }],
                 ];
                 if (pair) {

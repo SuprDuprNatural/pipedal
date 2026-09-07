@@ -18,6 +18,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
+#include "LatencyCompensation.hpp"
 #include "Pedalboard.hpp"
 #include "MidiEvent.hpp"
 #include "PluginHost.hpp"
@@ -58,6 +59,7 @@ namespace pipedal
         DbDezipper outputVolume;
 
         BufferPool bufferPool;
+        std::shared_ptr<PathLatency> outputLatency;
         std::vector<float *> pedalboardInputBuffers;
         std::vector<float *> pedalboardOutputBuffers;
         float *pedalboardSidechainBuffer = nullptr;
@@ -111,7 +113,7 @@ namespace pipedal
             std::vector<PedalboardItem> &items,
             std::vector<float *> inputBuffers,
             Lv2PedalboardErrorList &errorList,
-            ExistingEffectMap *existingEffects);
+            ExistingEffectMap *existingEffects, std::shared_ptr<PathLatency>& latency);
 
         void PrepareMidiMap(const Pedalboard &pedalboard);
         void PrepareMidiMap(const PedalboardItem &pedalboardItem);
@@ -156,6 +158,8 @@ namespace pipedal
         void Deactivate();
         void UpdateAudioPorts();
 
+        uint64_t GetLatencySamples() const { return outputLatency ? outputLatency->samples : 0; }
+        bool IsLatencyCompensationLimited() const { return outputLatency && outputLatency->limited; }
         bool Run(float **inputBuffers, float **outputBuffers, uint32_t samples, RealtimeRingBufferWriter *realtimeWriter);
 
         void ResetAtomBuffers();

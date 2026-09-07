@@ -950,3 +950,11 @@ install (TARGETS pipedald pipedaladmind pipedal_update DESTINATION ${CMAKE_INSTA
    )
 
    
+
+add_executable(latencyCompensationTest LatencyCompensationTest.cpp)
+target_compile_features(latencyCompensationTest PRIVATE cxx_std_20)
+target_compile_options(latencyCompensationTest PRIVATE -UNDEBUG)
+add_test(NAME LatencyCompensation COMMAND latencyCompensationTest)
+
+# Latency ports can contain NaN/Inf; do not optimize away validation.
+set_property(SOURCE Lv2Effect.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math -ffp-contract=off)

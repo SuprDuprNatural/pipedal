@@ -130,6 +130,11 @@ Lv2Effect::Lv2Effect(
     // FIXME: could we not stash the pPlugin in the plugin info?
     auto uriNode = lilv_new_uri(pWorld, pedalboardItem.uri().c_str());
     const LilvPlugin *pPlugin = lilv_plugins_get_by_uri(plugins, uriNode);
+    if (lilv_plugin_has_latency(pPlugin))
+        latencyControlIndex = int(lilv_plugin_get_latency_port_index(pPlugin));
+    bypassDelay.Prepare(2);
+    bypassBuffers.assign(2, std::vector<float>(pHost->GetMaxAudioBufferSize(), 0));
+    for (auto& buffer : bypassBuffers) bypassBufferPointers.push_back(buffer.data());
 
     for (auto &port : info->ports())
     {
@@ -659,6 +664,10 @@ void Lv2Effect::Activate()
         return;
     }
     this->activated = true;
+    bypassDelay.Reset();
+    stagingInputIx = stagingOutputIx = 0;
+    for (auto& buffer : outputStagingBuffers)
+        std::fill(buffer.begin(), buffer.begin()+stagingBufferSize, 0.0f);
     this->AssignUnconnectedPorts();
     lilv_instance_activate(pInstance);
     if (this->bypassControlIndex == -1)
@@ -1001,17 +1010,13 @@ void Lv2Effect::RunWithBufferStaging(uint32_t samples, RealtimeRingBufferWriter 
     uint32_t inputSampleOffset = 0;
     uint32_t outputSampleOffset = 0;
 
-    while (true)
+    while (inputSampleOffset < samples)
     {
-        outputSampleOffset = stageToOutput(outputSampleOffset, samples);
-
+        const uint32_t end = inputSampleOffset + std::min<size_t>(
+            samples-inputSampleOffset, stagingBufferSize-stagingInputIx);
+        outputSampleOffset = stageToOutput(outputSampleOffset, end);
         CheckStagingBufferSentries();
-
-        if (inputSampleOffset == samples)
-        {
-            break;
-        }
-        inputSampleOffset = stageToInput(inputSampleOffset, samples);
+        inputSampleOffset = stageToInput(inputSampleOffset, end);
     }
     // no staging data avaialble? Output zeros.
     if (outputSampleOffset != samples)
@@ -1027,6 +1032,13 @@ void Lv2Effect::RunWithBufferStaging(uint32_t samples, RealtimeRingBufferWriter 
         }
     }
     MixOutput(samples, realtimeRingBufferWriter);
+}
+
+uint32_t Lv2Effect::GetLatencySamples() const
+{
+    double reported = latencyControlIndex >= 0 ? controlValues[latencyControlIndex] : 0;
+    if (!std::isfinite(reported) || reported < 0) reported = 0;
+    return uint32_t(std::min<double>(UINT32_MAX, std::ceil(reported) + stagingBufferSize));
 }
 
 inline void Lv2Effect::MixOutput(uint32_t samples, RealtimeRingBufferWriter *realtimeRingBufferWriter)
@@ -1090,6 +1102,13 @@ inline void Lv2Effect::MixOutput(uint32_t samples, RealtimeRingBufferWriter *rea
         }
     }
 
+    // Keep history warm while enabled, and retain the reported delay when
+    // bypassed. This compensates buffering only; plugin phase and trails are
+    // separate contracts. Internal plugin bypass remains plugin-owned.
+    bypassDelay.SetDelay(GetLatencySamples());
+    if (!inputAudioBuffers.empty())
+        bypassDelay.Process(inputAudioBuffers.data(), bypassBufferPointers.data(),
+                            std::min<size_t>(2,inputAudioBuffers.size()), samples);
     // do soft bypass.
     if (this->bypassSamplesRemaining == 0)
     {
@@ -1098,19 +1117,19 @@ inline void Lv2Effect::MixOutput(uint32_t samples, RealtimeRingBufferWriter *rea
             // replace the contents of the output buffer(s) with the input buffer(s).
             if (this->outputAudioBuffers.size() == 1)
             {
-                CopyBuffer(this->inputAudioBuffers.at(0), this->outputAudioBuffers.at(0), samples);
+                CopyBuffer(bypassBufferPointers.at(0), this->outputAudioBuffers.at(0), samples);
             }
             else
             {
                 if (this->inputAudioBuffers.size() == 1)
                 {
-                    CopyBuffer(this->inputAudioBuffers.at(0), this->outputAudioBuffers.at(0), samples);
-                    CopyBuffer(this->inputAudioBuffers.at(0), this->outputAudioBuffers.at(1), samples);
+                    CopyBuffer(bypassBufferPointers.at(0), this->outputAudioBuffers.at(0), samples);
+                    CopyBuffer(bypassBufferPointers.at(0), this->outputAudioBuffers.at(1), samples);
                 }
                 else
                 {
-                    CopyBuffer(this->inputAudioBuffers.at(0), this->outputAudioBuffers.at(0), samples);
-                    CopyBuffer(this->inputAudioBuffers.at(1), this->outputAudioBuffers.at(1), samples);
+                    CopyBuffer(bypassBufferPointers.at(0), this->outputAudioBuffers.at(0), samples);
+                    CopyBuffer(bypassBufferPointers.at(1), this->outputAudioBuffers.at(1), samples);
                 }
             }
         } // else leave the output alone.
@@ -1123,7 +1142,7 @@ inline void Lv2Effect::MixOutput(uint32_t samples, RealtimeRingBufferWriter *rea
 
         if (this->outputAudioBuffers.size() == 1)
         {
-            float *restrict input = this->inputAudioBuffers.at(0);
+            float *restrict input = bypassBufferPointers.at(0);
             float *restrict output = this->outputAudioBuffers.at(0);
             for (uint32_t i = 0; i < samples; ++i)
             {
@@ -1143,12 +1162,12 @@ inline void Lv2Effect::MixOutput(uint32_t samples, RealtimeRingBufferWriter *rea
             float *restrict inputR;
             if (this->inputAudioBuffers.size() == 1)
             {
-                inputL = inputR = inputAudioBuffers.at(0);
+                inputL = inputR = bypassBufferPointers.at(0);
             }
             else
             {
-                inputL = inputAudioBuffers.at(0);
-                inputR = inputAudioBuffers.at(1);
+                inputL = bypassBufferPointers.at(0);
+                inputR = bypassBufferPointers.at(1);
             }
             float *restrict outputL = outputAudioBuffers.at(0);
             float *restrict outputR = outputAudioBuffers.at(1);
@@ -1552,9 +1571,11 @@ void Lv2Effect::EnableBufferStaging(size_t bufferSize )
     size_t nOutputs = this->GetNumberOfOutputAudioBuffers();
 
     stagingBufferSize = bufferSize;
-    stagingOutputIx = bufferSize;
+    stagingOutputIx = 0;
     stagingInputIx = 0;
     inputStagingBuffers.resize(nInputs);
+    sidechainStagingBuffers.resize(nSidechainInputs);
+    sidechainStagingBufferPointers.resize(nSidechainInputs);
     outputStagingBuffers.resize(nOutputs);
     inputStagingBufferPointers.resize(nInputs);
     outputStagingBufferPointers.resize(nOutputs);

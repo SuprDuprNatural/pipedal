@@ -20,6 +20,9 @@ endif()
 
 set(BUILD_DIRECTORY ${PROJECT_SOURCE_DIR}/vite/dist)
 
+# Keep added custom faces in the incremental UI build dependencies.
+file(GLOB SUPR_UI_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/pipedal/Supr*.tsx")
+
 
 add_custom_command(
     OUTPUT ${BUILD_DIRECTORY}/index.html
@@ -28,6 +31,7 @@ add_custom_command(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/vite
 
     DEPENDS
+        ${SUPR_UI_SOURCES}
         # find public src *.json *.ts  -type f >/tmp/tmp.txt                    
     public/css/modGui.css
     public/css/roboto.css

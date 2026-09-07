@@ -31,6 +31,8 @@ namespace pipedal {
     class IEffect {
     public:
         virtual ~IEffect() {}
+        virtual uint32_t GetLatencySamples() const { return 0; }
+        virtual bool IsLatencyCompensationLimited() const { return false; }
         virtual uint64_t GetInstanceId() const = 0;
         virtual bool IsLv2Effect() const = 0;
         virtual uint64_t GetMaxInputControl() const = 0;

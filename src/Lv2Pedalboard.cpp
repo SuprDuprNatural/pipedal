@@ -65,7 +65,7 @@ std::vector<float *> Lv2Pedalboard::PrepareItems(
     std::vector<PedalboardItem> &items,
     std::vector<float *> inputBuffers,
     Lv2PedalboardErrorList &errorList,
-    ExistingEffectMap *existingEffects)
+    ExistingEffectMap *existingEffects, std::shared_ptr<PathLatency>& latency)
 {
     for (int i = 0; i < items.size(); ++i)
     {
@@ -90,8 +90,17 @@ std::vector<float *> Lv2Pedalboard::PrepareItems(
 
                 this->processActions.push_back(preMixAction);
 
-                std::vector<float *> topResult = PrepareItems(item.topChain(), topInputs, errorList, existingEffects);
-                std::vector<float *> bottomResult = PrepareItems(item.bottomChain(), bottomInputs, errorList, existingEffects);
+                auto topLatency=latency, bottomLatency=latency;
+                std::vector<float *> topResult = PrepareItems(item.topChain(), topInputs, errorList, existingEffects, topLatency);
+                std::vector<float *> bottomResult = PrepareItems(item.bottomChain(), bottomInputs, errorList, existingEffects, bottomLatency);
+                auto topAligned=AllocateAudioBuffers(topResult.size());
+                auto bottomAligned=AllocateAudioBuffers(bottomResult.size());
+                latency=std::make_shared<PathLatency>();
+                auto compensation=std::make_shared<LatencyMerge>(
+                    topResult,bottomResult,topAligned,bottomAligned,topLatency,bottomLatency,latency);
+                this->activateActions.push_back([compensation] { compensation->Reset(); });
+                this->processActions.push_back([compensation](uint32_t frames) { compensation->Process(frames); });
+                topResult=topAligned; bottomResult=bottomAligned;
 
                 this->processActions.push_back(
                     [pSplit](uint32_t frames)
@@ -262,6 +271,13 @@ std::vector<float *> Lv2Pedalboard::PrepareItems(
                             });
                     }
 
+                    auto inputLatency=latency;
+                    latency=std::make_shared<PathLatency>();
+                    this->processActions.push_back([inputLatency,latency,pLv2Effect](uint32_t) {
+                        latency->SetSerial(*inputLatency,pLv2Effect->GetLatencySamples(),
+                                           pLv2Effect->IsLatencyCompensationLimited());
+                    });
+
                     // reset any trigger controls to default state after processing
                     if (pLv2Effect->IsLv2Effect())
                     {
@@ -337,7 +353,8 @@ void Lv2Pedalboard::Prepare(IHost *pHost, Pedalboard &pedalboard, Lv2PedalboardE
         this->pedalboardInputBuffers.push_back(bufferPool.AllocateBuffer<float>(pHost->GetMaxAudioBufferSize()));
     }
 
-    auto outputs = PrepareItems(pedalboard.items(), this->pedalboardInputBuffers, errorList, existingEffects);
+    outputLatency=std::make_shared<PathLatency>();
+    auto outputs = PrepareItems(pedalboard.items(), this->pedalboardInputBuffers, errorList, existingEffects, outputLatency);
     size_t nOutputs = GetNumberOfAudioOutputChannels();
     if (nOutputs == 1)
     {
@@ -489,6 +506,7 @@ void Lv2Pedalboard::UpdateAudioPorts()
 void Lv2Pedalboard::Activate()
 {
     CrashGuardLock crashGuardLock;
+    for (auto& action : activateActions) action();
 
     for (int i = 0; i < this->effects.size(); ++i)
     {

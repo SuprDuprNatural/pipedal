@@ -44,6 +44,13 @@ UIs are defined — but they are matched by exact plugin URI, so they simply nev
 appear unless the matching plugin is installed. No stock plugin's UI is replaced
 or modified by this fork.
 
+### Supr signal integrity
+
+The fork compensates reported plugin latency across serial/nested split paths
+and host soft bypass. The Supr faces include Forge, Echo, Space, Shape, Phase
+and the revised Learn/held controls. See [SuprIntegration.md](docs/SuprIntegration.md)
+for build, compatibility and coordinated deployment notes.
+
 ### Hardware controls
 
 Drive PiPedal from physical controls: GPIO switches, rotary encoders and ADC
