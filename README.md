@@ -47,8 +47,8 @@ or modified by this fork.
 ### Supr signal integrity
 
 The fork compensates reported plugin latency across serial/nested split paths
-and host soft bypass. The Supr faces include Forge, Echo, Space, Shape, Phase
-and the revised Learn/held controls. See [SuprIntegration.md](docs/SuprIntegration.md)
+and host soft bypass. The Supr faces include Forge, Echo, Space, Phase
+with the original Compressor, Clack and Fuzz controls. See [SuprIntegration.md](docs/SuprIntegration.md)
 for build, compatibility and coordinated deployment notes.
 
 ### Hardware controls

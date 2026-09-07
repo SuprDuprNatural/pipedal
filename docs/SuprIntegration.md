@@ -31,16 +31,15 @@ standalone helper test does not exercise the entire audio host.
 
 `ControlViewFactory.tsx` registers exact Supr URIs. `SuprPedalViews.tsx` lays out
 the collection using shared controls; `SuprNamView.tsx` renders model/routing
-information. `SuprLearnActions.tsx` applies DSP recommendations through ordinary
-saved controls and resubscribes on Ready. `SuprEchoActions.tsx` uses joined
+information. `SuprEchoActions.tsx` uses joined
 quarter/eighth/dotted-eighth buttons and quarter-note Tap. Echo/Space omit duck
 meters and put Send in Return; Hold remains an LV2/MIDI port without a face
-button. Shape and Phase are included. OctavePlus expansion is deferred.
+button. Phase is included; Shape was removed after audition. OctavePlus expansion is deferred.
 
 Follow `SUPRDESIGN.md`: values and meters come from the host/plugin, controls
 must follow presets and reconnect, and DOM measurements establish geometry.
-At 375 px the current Echo/Space faces fit 292 px; the Compressor uses wrapping
-columns so its meter, timing knobs and Held Peak selector remain reachable.
+At 375 px the current Echo/Space faces fit 292 px; the Compressor restores its 360 × 160 meter with four timing controls beneath
+it and its original setup controls to the right. It has no detector selector.
 The CMake UI dependencies include all `Supr*.tsx` files.
 
 ## Deployment
