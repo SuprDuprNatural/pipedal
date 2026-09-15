@@ -79,7 +79,7 @@ const SearchControl = withTheme(withStyles(
             }
         }
         componentDidUpdate(oldProps: SearchControlProps) {
-            if (oldProps.collapsed ?? false !== this.props.collapsed ?? false) {
+            if ((oldProps.collapsed ?? false) !== (this.props.collapsed ?? false)) {
                 let inputRef = this.getInputRef();
                 if (inputRef.current) {
                     if (!(this.props.collapsed ?? false)) {

@@ -45,7 +45,7 @@ function ToolTipEx(props: ToolTipExProps) {
 
     function startTimeout(timeout: number) {
         setTimeout(timeout);
-        setTimeoutInstance(timeoutInstance + 1); // make useeffect run.
+        setTimeoutInstance((instance) => instance + 1);
     }
     function stopTimeout() {
         setTimeout(0);
@@ -93,7 +93,7 @@ function ToolTipEx(props: ToolTipExProps) {
                 window.clearTimeout(handle);
             }
         };
-    }, [timeoutInstance]);
+    }, [timeout, timeoutInstance, valueTooltip]);
 
     React.useEffect(() => {
         if (longPressLeaving) {

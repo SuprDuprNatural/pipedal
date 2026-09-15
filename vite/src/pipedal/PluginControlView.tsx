@@ -509,8 +509,6 @@ const PluginControlView =
             }
 
             requestImeEdit(uiControl: UiControl, value: number) {
-                // eslint-disable-next-line no-restricted-globals
-
                 this.setState({
                     imeUiControl: uiControl,
                     imeValue: value,
@@ -1208,6 +1206,5 @@ const PluginControlView =
     ));
 
 export default PluginControlView;
-
 
 

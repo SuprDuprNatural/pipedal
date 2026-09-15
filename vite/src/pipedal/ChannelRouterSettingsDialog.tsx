@@ -339,21 +339,22 @@ function ChannelRouterSettingsDialog(props: ChannelRouterSettingsDialogProps) {
 
     const [settings, setSettings] = useState<ChannelRouterSettings>(GetDefaultChannelRouterSettings(model));
     const [showHelp, setShowHelp] = useState<boolean>(false);
+    const channelRouterSettings = model.channelRouterSettings;
 
 
     React.useEffect(() => {
         if (open) {
             let handleSettingsChanged = () => {
-                setSettings(model.channelRouterSettings.get());
+                setSettings(channelRouterSettings.get());
             };
-            model.channelRouterSettings.addOnChangedHandler(handleSettingsChanged);
+            channelRouterSettings.addOnChangedHandler(handleSettingsChanged);
             return () => {
-                model.channelRouterSettings.removeOnChangedHandler(handleSettingsChanged);
+                channelRouterSettings.removeOnChangedHandler(handleSettingsChanged);
             }
         } else {
             return () => { };
         }
-    }, [open]);
+    }, [channelRouterSettings, open]);
 
     const handleClose = (): void => {
         onClose();

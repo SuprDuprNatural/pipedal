@@ -143,6 +143,20 @@ public:
 
     bool prepare_body(std::error_code& ec);
 
+    void finish_body(std::error_code& ec)
+    {
+        if (m_uploading_to_file)
+        {
+            m_outputStream.close();
+            if (!m_outputStream)
+            {
+                ec = websocketpp::http::error::make_error_code(websocketpp::http::error::istream_bad);
+                return;
+            }
+        }
+        m_ready = true;
+    }
+
     std::error_code process(std::string::iterator begin, std::string::iterator end);
     size_t process_body(char const* buf, size_t len,
         std::error_code& ec);
@@ -298,8 +312,7 @@ inline size_t request_with_file_upload::consume(char const* buf, size_t len, std
         // if we have ready all the expected body bytes set the ready flag
         if (body_ready())
         {
-            m_outputStream.close();
-            m_ready = true;
+            finish_body(ec);
         }
         return bytes_processed;
     }
@@ -406,9 +419,10 @@ inline size_t request_with_file_upload::consume(char const* buf, size_t len, std
                 }
                 if (body_ready())
                 {
-                    m_ready = true;
+                    // Small uploads can arrive with their headers in one read.
+                    // Close here too, before handlers inspect the temporary file.
+                    finish_body(ec);
                 }
-                ec = std::error_code();
                 return bytes_processed;
             }
             else
@@ -1486,7 +1500,7 @@ void WebServerImpl::DisplayIpAddresses()
     auto wifiAddress = GetWlanIpv4Address();
     if (wifiAddress)
     {
-        if (*wifiAddress == "10.42.0.1")
+        if (*wifiAddress == "192.168.60.1")
         {
             Lv2Log::info(SS("Listening on Wi-Fi hotspot address " << *wifiAddress << ":" << this->port));
         }

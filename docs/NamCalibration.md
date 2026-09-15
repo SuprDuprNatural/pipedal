@@ -63,7 +63,12 @@ Note also, that calibration generally only works for the first NAM plugin in an 
 
 Well, then you won't get calibrated output. But you will still get perfectly good sound. You can simply adjust the "Input Gain" control in TooB Neural Amp Modeler to suit your own tastes and playing style. The sound of the amp model is determined by the selected model and its parameters, not by this calibration process.
 
-There is some value to turning calibration on, even if you don't actually perform the calibration process: specifically, turning Cailbration on usually makes it easier to set initial input gain settings when loading a new model. When working with older uncalibrated models, it sometimes take a bit of effort to figure out what input levels need to be fed to the model. For uncalibrated models, there is no real convention for how loud the input signal needs to be to get best results from the model. You may have to experiment with input gain settings until you find a good vaue. However, when working with newer calibrated models, default TooB Neural Amp Modeler control settings will usually be approximately correct. Not exactly correct, neccesarily. You may still need to tweak the input gain knob to get a sound that you want. 
+Enabling calibration can still help even if you do not perform the calibration
+procedure, because it provides more useful initial gain settings when loading a
+model. Older uncalibrated models do not follow a consistent input-level
+convention, so finding the right gain may require experimentation. Newer
+calibrated models usually start close to the correct TooB Neural Amp Modeler
+settings, although you may still want to adjust input gain by ear.
 
 The key to getting approximately correct outputs from a calibrated model is to set a __fictional__ dBU level of -6 dBU in TooB Neural Amp Modeler's calbration Value control. Typical dBU measurements for guitar signals are usually in the range of -20 dBU to -2 dBU. Humbucker pickups tend to be in the -10 dBU to -2 dBU range, and are nominally somewhere around -6 dBU. Single coil pickets tend to be somewhere in the -6 to -20 dBU range, and are nominally about -11 dBU. So if you were to set the calibration value to -6 dBU, and trim your digital signal to 0 dBFS, then you would feed the model with data that is close to what the model would expect were you to be playing with a fictional guitar that produces -6 dBU voltage levels. So not calibrated, but almost certainly in the right range for what the NAM model expects. For models that explicitly identify themselves as models that have been calibrated for single-coil pickups, you may get better results if you set the fictional Calibration value to -11 dBU.
 
@@ -95,4 +100,4 @@ If you must feed output of a NAM effect simulation to a downstream NAM amp model
 
 
 --------
-[<< An Intro to Snapshots](Snapshots.md) | [Up](Documentation.md) | [Choosing a USB Audio Adapter >>](ChoosingAUsbAudioAdapter.md)  
+[<< An Intro to Snapshots](Snapshots.md) | [Up](Documentation.md) | [Choosing a USB Audio Adapter >>](ChoosingAUsbAudioAdapter.md)

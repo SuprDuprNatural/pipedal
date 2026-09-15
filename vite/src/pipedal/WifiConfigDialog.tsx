@@ -642,17 +642,13 @@ const WifiConfigDialog = withStyles(
                                 <Typography className={classes.pgraph} variant="body2" color="textPrimary">
                                     If there are multiple locations, and multiple Wi-Fi routers you use with PiPedal on a regular basis, you can select
                                     the <b><i>No remembered Wi-Fi connections</i></b> option, but this is a riskier option. The PiPedal hotspot will be automatically turned on if there are no
-                                    Wi-Fi access points in range that you have previously connected to from your Raspberry Pi, and will be automatically turned on otherwise.
-                                    The risk is that you could find yourself unable to connect to your Raspberry Pi when performing
-                                    at a local bar, after you have used your Rasberry Pi to connect to the Wi-Fi access point at the coffee shop nextdoor. (Public Wi-Fi access
-                                    points usually won't work because devices that are connected to a public access point can't connect to each other).
-                                    Will you ever do that? Probably not. But there is some risk that you might find yourself unable to connect at a live venue. Whether that's an
-                                    acceptable risk is up to you.
+                                    Wi-Fi access points in range that you have previously connected to from your Raspberry Pi, and will be turned off otherwise.
+                                    If the device remembers a nearby public network, this option could leave the hotspot unavailable at a venue.
+                                    Public Wi-Fi also commonly prevents connected devices from communicating with one another.
                                 </Typography>
                                 <Typography className={classes.pgraph} variant="body2" color="textPrimary">
                                     Typically, when you're away from home, there's no easy way to connect to your Raspberry Pi from a laptop in order to
-                                    correct the problem. So you should carefully test that your auto-hotspot configuration works as expected before you adventure
-                                    away from home with PiPedal.
+                                    correct the problem. Test the auto-hotspot configuration before taking PiPedal away from your normal network.
                                 </Typography>
 
                             </DialogContent>
@@ -683,7 +679,7 @@ const WifiConfigDialog = withStyles(
                                         online documentation</a> provides a discussion of how to choose safe hotspot auto-start options.
                                 </Typography>
                                 <Typography className={classes.pgraph} variant="body2" color="textPrimary">
-                                    When you are connected to the PiPedal hotspot, you can connect to the PiPedal web server at http://10.48.0.1.
+                                    When connected to the PiPedal hotspot, open http://192.168.60.1 to reach the PiPedal web server.
                                 </Typography>
                                 <Typography className={classes.pgraph} variant="body2" color="textPrimary" gutterBottom>
                                     Are you sure you want to continue?

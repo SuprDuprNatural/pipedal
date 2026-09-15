@@ -81,7 +81,7 @@ function SelectMidiChannelsDialog(props: SelectMidiChannelsDialogProps) {
         } else {
             return () => { };
         }
-    }, [open]);
+    }, [model, open]);
     React.useEffect(() => {
         if (availablePorts !== null && configuration !== null) {
             let result: DeviceListItem[] = [];

@@ -233,9 +233,9 @@ function SliderWithPreview(props: SliderWithPreviewProps) {
     const [pointerDown, setPointerDown] = React.useState(false);
 
 
-    // code to handle a bug in crhome relating to mouseup events, that causes zero values to not be set.
+    // Work around a Chrome mouseup bug that can prevent zero values from being committed.
 
-    const handleMouseUp = (e: MouseEvent) => {
+    const handleMouseUp = React.useCallback((e: MouseEvent) => {
         if (pointerDown && e.button === 0) { // Left mouse button
             setPointerDown(false);
             if (previewArguments) {
@@ -245,7 +245,7 @@ function SliderWithPreview(props: SliderWithPreviewProps) {
                 setPreviewArguments(null);
             }
         }
-    };
+    }, [onCommitPreviewValue, pointerDown, previewArguments]);
 
     useEffect(() => {
         document.addEventListener('mouseup', handleMouseUp);
@@ -254,7 +254,7 @@ function SliderWithPreview(props: SliderWithPreviewProps) {
         return () => {
             document.removeEventListener('mouseup', handleMouseUp);
         };
-    }, []); // Re-run effect when tempValue changes to ensure latest value is committed
+    }, [handleMouseUp]);
 
 
     return (
@@ -326,23 +326,16 @@ function SliderWithPreview(props: SliderWithPreviewProps) {
 
 function TimeEdit(props: TimeEditProps) {
     let { value, onValueChange, onBlur, timebase, sampleRate, max, ...extra } = props;
-    const [text, setText] = React.useState(formatTime(timebase, props.sampleRate, props.value));
+    const [text, setText] = React.useState(formatTime(timebase, sampleRate, value));
     const [error, setError] = React.useState(false);
     const [focus, setFocus] = React.useState(false);
     // slice props.
 
     React.useEffect(() => {
         if (!focus) {
-            setText(formatTime(timebase, sampleRate, props.value));
+            setText(formatTime(timebase, sampleRate, value));
         }
-    },
-        [props.value]);
-
-    React.useEffect(() => {
-        if (!focus) {
-            setText(formatTime(props.timebase, sampleRate, props.value));
-        }
-    }, [props.timebase, sampleRate]);
+    }, [focus, sampleRate, timebase, value]);
 
 
 
@@ -646,4 +639,3 @@ export default function LoopDialog(props: LoopDialogProps) {
         </DialogEx>
     )
 }
-

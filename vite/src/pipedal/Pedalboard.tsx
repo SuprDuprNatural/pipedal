@@ -416,6 +416,7 @@ export class Pedalboard implements Deserializable<Pedalboard> {
         this.pathProperties = input.pathProperties;
         this.selectedPlugin = input.selectedPlugin??-1;
         this.gpioBindings = GpioBinding.deserializeArray(input.gpioBindings);
+        this.oledArtwork = input.oledArtwork == null ? undefined : [...input.oledArtwork];
         return this;
     }
 
@@ -433,6 +434,7 @@ export class Pedalboard implements Deserializable<Pedalboard> {
     pathProperties: {[Name: string]: string} = {};
     selectedPlugin: number = -1;
     gpioBindings: GpioBinding[] = [];
+    oledArtwork?: number[];
 
     // yields all items in the pedalboard, including split items. Splits are yielded before their children.
     *itemsGenerator(): Generator<PedalboardItem, void, undefined> {

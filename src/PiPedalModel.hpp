@@ -167,6 +167,7 @@ namespace pipedal
             Effects = 2,
             Parameters = 3
         };
+        clock::time_point gpioPresetChangeAllowedAt{};
         GpioNavigationLayer gpioNavigationLayer = GpioNavigationLayer::Parameters;
         int32_t gpioSettingsMenuIndex = 0;
         int64_t gpioSelectedEffectId = -1;
@@ -206,7 +207,7 @@ namespace pipedal
             std::optional<float> stepOverride = std::nullopt);
         void UpdateGpioDashboard(int32_t activeSlot = 0, bool temporary = false);
         void ExecuteGpioBinding(const GpioBinding &binding, const GpioInputEvent &event);
-        void ShowGpioBindingValue(const GpioBinding &binding, std::optional<float> value);
+        void ShowGpioBindingValue(const GpioBinding &binding, const GpioInputEvent &event, std::optional<float> value);
         void FireGpioSettingsChanged();
         void FireGpioInputStatusChanged(const GpioInputStatus &status);
         void RefreshCodecZeroPresence();
@@ -479,7 +480,7 @@ namespace pipedal
         int64_t UploadPreset(const BankFile &bankFile, int64_t uploadAfter = -1);
         void UploadPluginPresets(const PluginPresets &pluginPresets);
         void SaveCurrentPreset(int64_t clientId);
-        int64_t SaveCurrentPresetAs(int64_t clientId, int64_t bankInstanceId, const std::string &name, int64_t saveAfterInstanceId = -1);
+        int64_t SaveCurrentPresetAs(int64_t clientId, int64_t bankInstanceId, const std::string &name, int64_t saveAfterInstanceId = -1, int64_t overwritePresetId = -1);
         int64_t SavePluginPresetAs(int64_t instanceId, const std::string &name);
 
         void LoadPreset(int64_t clientId, int64_t instanceId);
@@ -531,6 +532,8 @@ namespace pipedal
         void SetGpioSettings(const GpioSettings &settings);
         GpioCapabilities GetGpioCapabilities();
         std::vector<GpioInputStatus> GetGpioInputStatuses();
+        void SetOledArtwork(int64_t clientId, int64_t bankId, int64_t presetId,
+            const std::optional<OledArtwork> &artwork);
         void SetGpioBindings(int64_t clientId, const std::vector<GpioBinding> &bindings);
 
         int64_t MonitorPort(int64_t instanceId, const std::string &key, float updateInterval, PortMonitorCallback onUpdate);

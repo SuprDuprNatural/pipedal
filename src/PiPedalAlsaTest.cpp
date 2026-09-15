@@ -124,7 +124,8 @@ void TestConfigMigration()
 
 }
 
-TEST_CASE("ALSA Seq Test", "[pipedal_alsa_seq_test][Build][Dev]")
+// Manual monitor: requires the named MIDI device and runs until interrupted.
+TEST_CASE("ALSA sequencer interactive monitor", "[.][pipedal_alsa_seq_test]")
 {
 
     // hw:CARD=VirMIDI,DEV=0 VirMIDI

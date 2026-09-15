@@ -1,50 +1,34 @@
-# React + TypeScript + Vite
+# PiPedal web application
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains PiPedal's React and TypeScript frontend.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Install exactly the dependencies recorded in `package-lock.json`:
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
-
-- Configure the top-level `parserOptions` property like this:
-
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+```sh
+npm ci
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+Start Vite and point its dynamic routes at a running `pipedald` server:
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
-
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+```sh
+PIPEDAL_SERVER=http://127.0.0.1:8080 npm run dev
 ```
+
+The application is then available at <http://localhost:5173>. Without
+`PIPEDAL_SERVER`, the proxy defaults to `http://localhost:8080`.
+
+## Validation and production build
+
+```sh
+npm run lint
+npm run build
+```
+
+`npm run build` type-checks the project and writes the production bundle to
+`dist/`. The repository-level CMake build invokes `build.sh`, which also makes
+gzip copies of generated JavaScript assets for the production server.
+
+See [the debugging guide](../docs/Debugging.md) for C++ server and Visual Studio
+Code setup.

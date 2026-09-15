@@ -6,7 +6,7 @@ set -euo pipefail
 # For a verified hostname alias: export RSYNC_RSH='ssh -o HostKeyAlias=pi4'
 cd "$(dirname "$0")"
 npm run build
-compgen -G 'dist/assets/main-*.js' >/dev/null || { echo 'No main bundle' >&2; exit 1; }
+compgen -G 'dist/assets/*.js' >/dev/null || { echo 'No JavaScript bundle' >&2; exit 1; }
 for file in dist/assets/*.js; do gzip -c "$file" > "$file.gz"; done
 PI="${PI:-pi@raspberrypi.local}"
 rsync -az --delete dist/ "$PI:supr-ui-staged/"

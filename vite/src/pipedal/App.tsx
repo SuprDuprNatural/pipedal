@@ -25,7 +25,6 @@ import CssBaseline from '@mui/material/CssBaseline';
 import VirtualKeyboardHandler from './VirtualKeyboardHandler';
 import AppThemed from "./AppThemed";
 import { isDarkMode } from './DarkMode';
-import Tone3000AuthComplete from './Tone3000AuthComplete';
 import FontTest from './FontTest';
 
 import IconTest from './IconTest';
@@ -243,11 +242,6 @@ type AppThemeProps = {
 };
 
 
-function isTone3000Auth() {
-    let url = new URL(window.location.href);
-    let param = url.searchParams.get("api_key");
-    return (param !== null && param !== "")
-}
 function isFontTest() {
     let url = new URL(window.location.href);
     let param = url.searchParams.get("fontTest");
@@ -279,8 +273,7 @@ const App = (class extends React.Component {
                 <ThemeProvider theme={theme}>
                     <CssBaseline />
                     {
-                        isTone3000Auth() && (<Tone3000AuthComplete />)
-                        || isFontTest() && (<FontTest />)
+                        isFontTest() && (<FontTest />)
                         || isIconTest() && (<IconTest />)
                         || (<AppThemed />)
                     }

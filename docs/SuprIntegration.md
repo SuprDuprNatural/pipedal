@@ -2,8 +2,7 @@
 
 This fork supplies the custom faces and transport-delay compensation for the
 companion [SuprPedals](https://github.com/SuprDuprNatural/SuprPedals) collection.
-DSP/LV2 contracts and current deployment acceptance live in that repository's
-`docs/RELIABILITY.md` and `docs/RELEASE_STATUS.md`. Keep the repositories together
+Keep the repositories together
 when deploying; do not push this fork to upstream `origin`. Its publication
 remote is `fork` (SuprDuprNatural/pipedal).
 

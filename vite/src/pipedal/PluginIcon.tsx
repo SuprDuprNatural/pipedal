@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 // Copyright (c) Robin E.R. Davies
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -158,7 +157,7 @@ function makeDefaultColorMap(): {[key:string]: string} {
 const iconColors: {[key:string]: string} = makeDefaultColorMap();
 
 export const getIconColor = (key?: string): string| undefined => {
-    if (iconColors.hasOwnProperty(key!))
+    if (Object.prototype.hasOwnProperty.call(iconColors, key!))
     {
         return iconColors[key!];
     }

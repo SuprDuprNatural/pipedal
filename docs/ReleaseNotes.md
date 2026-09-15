@@ -259,7 +259,7 @@ automatically loads A72- or A76-optimized code depending on which processor you 
 
 - Select README.md or LICENSE.md files in File Selection dialogs to view their contents inside the PiPedal UI.
 
-- PiPedal respects LV2 plugins' minimum-buffer-size requirements. If PiPedal is using a buffer size smaller than the plugin's minimum size, PiPedal will assemble buffers of the currect size before passing them to the plugin. This allows use of plugins written in Faust, including a number of useful plugins from Guitarix/Lv2 and Gx/Lv2 projects.
+- PiPedal respects LV2 plugins' minimum-buffer-size requirements. If PiPedal is using a buffer size smaller than the plugin's minimum size, PiPedal will assemble buffers of the correct size before passing them to the plugin. This allows use of plugins written in Faust, including a number of useful plugins from Guitarix/LV2 and Gx/LV2 projects.
 
 Please refer to Beta release notes below for a more complete list of features and bug fixes since the last Release build.
 
@@ -573,9 +573,9 @@ Known issues:
 ### Backwards Compatibility With the Previous Upload Directory Scheme
 
 Sharing file types poses a problem with previous versions of PiPedal which did not share uploads by file type, but instead placed uploads in a private directory for each plugin.
-In order to accomodate this, Pipedal provides legacy support for this situation. If a private upload directory for a plugin exists, the file property selection dialog will show
+To accommodate this, PiPedal provides legacy support. If a private upload directory for a plugin exists, the file property selection dialog will show
 both the new shared directories, and the old private directory. The private directory has a name that reflects the name of the plugin (e.g. "Ratatoille.lv2"). This directory only
-shows up if you have used the plugin on previous versions of Pipedal. If you have nothingof particular value in the old private upload directory, you can delete the plugin's private directory (which can be found in `/var/pipedal/audio_uploads`), and the private directory will no longer be displayed in the PiPedal UI.
+appears if you used the plugin with an earlier PiPedal version. If the old private upload directory contains nothing you need, delete the plugin's directory under `/var/pipedal/audio_uploads`; it will no longer appear in the PiPedal UI.
 
 I anticipate providing a migration utility in the near future which will clean up and migrate legacy upload directories to the new directory structure (automatically uploading
 presets which reference uploaded files that have moved). In the meantime, I think you will find the current occomodation for legacy upload directories perfectly functional. 
@@ -674,7 +674,7 @@ Bug fixes:
 ## PiPedal 1.3.53 Release
 
 Major features:
-- Snapshots. For a discussion of what snapshot are, see [An Intro to Snapshots](https://rerdavies.github.io/pipedal/Snaphots.html)
+- Snapshots. For an introduction, see [An Intro to Snapshots](https://rerdavies.github.io/pipedal/Snapshots.html).
 - New <b><i>Performance View<</i></b> providing an user-interface optimized for live performance rather than editing of plugins.
 - New System Midi Bindings for snapshot selection, and for previous and next bank.
 
@@ -700,7 +700,7 @@ Bug fixes:
 
 This release replaces Wi-Fi Direct connections with Wi-Fi hotspots. Support for Wi-Fi Direct on Linux and Android has been fragile for some time. An update to Raspberry Pi OS in early September broke Wi-Fi Direct support completely. As it turns out, Auto-hotspots work much better. 
 
-The new Auto-Hostpot feature in PiPedal allows you to configure your Raspberry Pi so it automatically starts a Wi-Fi hotspot whenever you are away from home. The updated Android PiPedal Client will automatically detect and connect to your Raspberry PI whenever it is visible on the current Wi-Fi network. An updated Android [PiPedal Remote](https://play.google.com/store/apps/details?id=com.twoplay.pipedal&hl=en_US&pli=1) app has been posted on Google Play. Make sure you are using the updated version.
+The new auto-hotspot feature lets the Raspberry Pi start a Wi-Fi hotspot when it is away from its normal network. The updated Android PiPedal client detects and connects to PiPedal when it is visible on the current Wi-Fi network. An updated [PiPedal Remote](https://play.google.com/store/apps/details?id=com.twoplay.pipedal&hl=en_US&pli=1) app is available on Google Play.
 
 New MIDI system bindings allow you to enable or disable the Wi-Fi hotspot, and to shut down or reboot your Raspberry Pi using MIDI-triggered events.
 
@@ -716,7 +716,7 @@ Bug fixes:
 - pipedald service hangs and/or throws exceptions on shutdown.
 - Update DNS/SD service announcements when the device name is changed. 
 - Unannounce DNS/DS services when the pipedal services shuts down.
-- Auto-uprade checks may exceed the throttling rate of Github API calls when checking for updates.
+- Auto-upgrade checks may exceed the GitHub API rate limit.
 - Memory corruption when ALSA device creation fails.
 - MIDI input causing audio glitches and underruns.
 - Unable to connect when using IPv6 connections and mDNS name resolution.
@@ -781,7 +781,7 @@ Bug fixes:
 This version includes the following new features:
 
 - Supports Raspberry Pi 5.
-- Supports Rasberry Pi OS Bookworm.
+- Supports Raspberry Pi OS Bookworm.
 - TooB ML allows uploading of models. See below for further details.
 - TooBML support for large models (e.g. GuitarML Proteus models)
 - Upload .zip file bundles to all File plugin controls.

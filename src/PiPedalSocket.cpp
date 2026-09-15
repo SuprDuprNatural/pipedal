@@ -438,6 +438,7 @@ public:
     int64_t bankInstanceId_ = -1;
     std::string name_;
     int64_t saveAfterInstanceId_ = -1;
+    int64_t overwritePresetId_ = -1;
 
     DECLARE_JSON_MAP(SaveCurrentPresetAsBody);
 };
@@ -446,6 +447,7 @@ JSON_MAP_REFERENCE(SaveCurrentPresetAsBody, clientId)
 JSON_MAP_REFERENCE(SaveCurrentPresetAsBody, bankInstanceId)
 JSON_MAP_REFERENCE(SaveCurrentPresetAsBody, name)
 JSON_MAP_REFERENCE(SaveCurrentPresetAsBody, saveAfterInstanceId)
+JSON_MAP_REFERENCE(SaveCurrentPresetAsBody, overwritePresetId)
 JSON_MAP_END();
 
 class SavePluginPresetAsBody
@@ -1486,7 +1488,7 @@ public:
     {
         SaveCurrentPresetAsBody body;
         pReader->read(&body);
-        int64_t result = this->model.SaveCurrentPresetAs(this->clientId, body.bankInstanceId_, body.name_, body.saveAfterInstanceId_);
+        int64_t result = this->model.SaveCurrentPresetAs(this->clientId, body.bankInstanceId_, body.name_, body.saveAfterInstanceId_, body.overwritePresetId_);
         Reply(replyTo, "saveCurrentPresetsAs", result);
     }
     REGISTER_MESSAGE_HANDLER(saveCurrentPresetAs)
@@ -1993,6 +1995,23 @@ public:
         this->Reply(replyTo, "getGpioInputStatuses", this->model.GetGpioInputStatuses());
     }
     REGISTER_MESSAGE_HANDLER(getGpioInputStatuses)
+
+    void handle_setOledArtwork(int replyTo, json_reader *pReader)
+    {
+        // Ordered tuple avoids another wire-only request class.
+        int64_t bankId, presetId;
+        std::optional<OledArtwork> artwork;
+        pReader->consume('[');
+        pReader->read(&bankId);
+        pReader->consume(',');
+        pReader->read(&presetId);
+        pReader->consume(',');
+        pReader->read(&artwork);
+        pReader->consume(']');
+        model.SetOledArtwork(clientId, bankId, presetId, artwork);
+        Reply(replyTo, "setOledArtwork", true);
+    }
+    REGISTER_MESSAGE_HANDLER(setOledArtwork)
 
     void handle_setGpioBindings(int replyTo, json_reader *pReader)
     {

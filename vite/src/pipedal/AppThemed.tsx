@@ -588,7 +588,6 @@ export
     }
 
     private beforeUnloadListener(e: Event) {
-        alert("BeforeUnload");
         this.model_.close();
         return undefined;
     }

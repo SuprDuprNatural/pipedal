@@ -285,6 +285,13 @@ export default function GpioSettingsDialog(props: GpioSettingsDialogProps) {
                                             </TextField>
                                         </Box>
                                         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                                            <FormControlLabel label="Preset name on load" control={<Switch checked={settings.display.presetNameOnLoad}
+                                                onChange={event => { const copy = settings.clone(); copy.display.presetNameOnLoad = event.target.checked; setSettings(copy); }} />} />
+                                            <FormControlLabel label="Preset artwork" control={<Switch checked={settings.display.presetArtwork}
+                                                onChange={event => { const copy = settings.clone(); copy.display.presetArtwork = event.target.checked; setSettings(copy); }} />} />
+                                            <FormControlLabel label="Swipe reveal" control={<Switch checked={settings.display.swipeReveal}
+                                                onChange={event => { const copy = settings.clone(); copy.display.swipeReveal = event.target.checked; setSettings(copy); }} />} />
+                                            <Typography variant="body2" color="text.secondary">Preset names and artwork can be enabled independently. Artwork replaces the name and fills the lower display for 2 seconds.</Typography>
                                             <FormControlLabel label="Include waveform view in the OLED cycle" control={<Switch checked={settings.display.waveformEnabled}
                                                 onChange={event => {
                                                     const copy = settings.clone();

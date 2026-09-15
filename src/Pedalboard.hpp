@@ -23,6 +23,7 @@
 #include "json_variant.hpp"
 #include "MidiBinding.hpp"
 #include "Gpio.hpp"
+#include "OledArtwork.hpp"
 #include "StateInterface.hpp"
 #include "atom_object.hpp"
 
@@ -236,6 +237,7 @@ namespace pipedal
         // Hardware control mappings are part of a preset. GPIO pin and ADC
         // configuration itself is global and is stored separately.
         std::vector<GpioBinding> gpioBindings_;
+        std::optional<OledArtwork> oledArtwork_;
 
         // Where the hardware parameter encoder is scrolled to, held as the
         // first shown parameter rather than an index so that it survives
@@ -282,6 +284,7 @@ namespace pipedal
         GETTER_SETTER(selectedSnapshot)
         GETTER_SETTER(selectedPlugin)
         GETTER_SETTER_VEC(gpioBindings)
+        GETTER_SETTER_REF(oledArtwork)
         GETTER_SETTER(gpioScrollInstanceId)
         GETTER_SETTER_REF(gpioScrollSymbol)
 

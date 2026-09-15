@@ -196,11 +196,6 @@ const PresetDialog = withStyles(
             this.handleSelectionUpdated(selectedItems);
         }
 
-        selectItemAtIndex(index: number) {
-            let instanceId = this.state.presets.presets[index].instanceId;
-            this.setSelection(instanceId);
-        }
-
         onMoreClick(e: SyntheticEvent): void {
             this.setState({ moreMenuAnchorEl: e.currentTarget as HTMLElement })
         }
@@ -339,26 +334,6 @@ const PresetDialog = withStyles(
                 </div>
 
             );
-        }
-
-        updateServerPresets(newPresets: PresetIndex) {
-            newPresets = newPresets.clone();
-            this.model.updatePresets(newPresets)
-                .catch((error) => {
-                    this.model.showAlert(error);
-                });
-        }
-        moveElement(from: number, to: number): void {
-            let newPresets = this.state.presets.clone();
-            newPresets.movePreset(from, to);
-            let toInstanceId = newPresets.presets[to].instanceId;
-            this.setState({
-                presets: newPresets,
-                currentItem: toInstanceId,
-                selectedItems: new Set<number>([toInstanceId])
-
-            });
-            this.updateServerPresets(newPresets);
         }
 
         getSelectedName(): string {
@@ -617,9 +592,8 @@ const PresetDialog = withStyles(
                                         this.showTouchActionBar(true);
                                     }
                                 }}
-                            canDrag={!this.state.multiSelect && !this.state.showTouchActionBar}
-                                onDragStart={(index, x, y) => { this.selectItemAtIndex(index) }}
-                                moveElement={(from, to) => { this.moveElement(from, to); }}
+                                canDrag={false}
+                                moveElement={() => {}}
                                 scroll={ScrollDirection.Y}
                             >
                                 {

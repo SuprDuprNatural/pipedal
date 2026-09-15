@@ -160,11 +160,23 @@ namespace pipedal
                     {
                         ++it;
                         this->presets_.insert(it, std::move(entry));
-                        break;
+                        return instanceId;
                     }
                 }
+                // A stale insertion anchor must not report success without saving.
+                this->presets_.push_back(std::move(entry));
             }
             return instanceId;
+        }
+        int64_t savePreset(const Pedalboard &preset, int64_t afterItem, int64_t overwritePresetId)
+        {
+            if (overwritePresetId == -1)
+                return addPreset(preset, afterItem);
+            auto &entry = getItem(overwritePresetId);
+            if (entry.preset().name() != preset.name())
+                throw PiPedalStateException("The preset to overwrite has changed. Please try again.");
+            entry.preset(preset);
+            return entry.instanceId();
         }
         bool hasItem(int64_t instanceId)
         {

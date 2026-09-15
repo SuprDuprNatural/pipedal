@@ -1,6 +1,6 @@
 import { PiPedalModel, getErrorMessage, Tone3000PkceParams } from "./PiPedalModel";
 import Tone3000DownloadType from "./Tone3000DownloadType";
-import { T3K_DEBUG, PkceParams, setServerPkceParams, handleOAuthCallback } from "./t3k/tone3000-client.ts";
+import { PkceParams, setServerPkceParams, handleOAuthCallback } from "./t3k/tone3000-client.ts";
 
 import { DeprecatedPlatform, FileFormat as Format, Model, PaginatedResponse, Tone } from "./t3k/types.ts";
 import { PUBLISHABLE_KEY } from './t3k/config.ts';
@@ -23,7 +23,6 @@ async function asyncSleep(ms: number): Promise<void> {
 const USE_SERVER_PCKE=true;
 
 
-const RUN_THROTTLER_TEST = true;
 const ALLOWED_DOWNLOADS_PER_MINUTE = 25;
 const THROTTLING_TRIGGGER_LEVEL = Math.floor(ALLOWED_DOWNLOADS_PER_MINUTE/2);
 const PROMPT_FOR_SELECT_THRESHOLD = 15;
@@ -66,21 +65,6 @@ class DownloadThrottler {
 }
 
 
-function runThrottlerTest() {
-    // just dump the delay times for a few downloads to the debugger console, to verify that the throttler is working as expected;
-    let throttler = new DownloadThrottler();
-
-    let download = 0;
-    let now = 0;
-    console.debug("Tone3000 Throttler Test");
-
-    while (download < ALLOWED_DOWNLOADS_PER_MINUTE *4) {
-        let delay = throttler.getThrottleDelay(now);
-        now += delay;
-        ++download;
-    } 
-}
-
 export class Tone3000DownloadHandler {
 
     // private async handleTone3000Download(
@@ -106,9 +90,6 @@ export class Tone3000DownloadHandler {
 
 
     public constructor(model: PiPedalModel) {
-        if (RUN_THROTTLER_TEST) {
-            runThrottlerTest();
-        }
         this.model = model;
         this.t3kClient = new T3KClient(
             PUBLISHABLE_KEY,
@@ -116,14 +97,16 @@ export class Tone3000DownloadHandler {
                 model.showAlert("TONE3000 authentication failed. Please try again.");
             }
         );
-        let this_ = this;
         this.messageEventListener = (event: MessageEvent) => {
-            if (event.data?.type === "t3k_response") {
+            if (!this.popupWindow || event.source !== this.popupWindow ||
+                event.data?.type !== "t3k_response") return;
+            const callbackOrigin = new URL(this.redirectUrl()).origin;
+            if (event.origin === callbackOrigin) {
                 let uri = event.data.uri;
                 this.handleTone3000DownloadComplete();
                 if (uri) {
 
-                    this_.handleT3kSelectResponse(uri, event.data.storedState, event.data.codeVerifier)
+                    this.handleT3kSelectResponse(uri)
                         .then(() => { })
                         .catch((error) => {
                             model.showAlert(getErrorMessage(error));
@@ -144,11 +127,7 @@ export class Tone3000DownloadHandler {
         }
     }
 
-    private async handleT3kSelectResponse(
-        uri: string,
-        popupStoredState: string | null,
-        popupCodeVerifier: string | null
-    ): Promise<void> {
+    private async handleT3kSelectResponse(uri: string): Promise<void> {
         if (this.pkceParams === null) {
             this.model.showAlert("Invalid PKCE parameters. Please try again.");
             return;
@@ -242,9 +221,6 @@ export class Tone3000DownloadHandler {
     ): Promise<void> {
         try {
 
-            if (T3K_DEBUG) {
-                console.debug("PiPedal responseUri: " + responseUri);
-            }
             this.onTone3000DownloadStarted();
             this.progress.title = "Authenticating..."
             this.onTone3000DownloadProgress(this.progress);

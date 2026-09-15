@@ -54,9 +54,6 @@ import type {
 } from './types';
 
 
-export const T3K_DEBUG: boolean = true;
-
-
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export interface T3KTokens {
@@ -178,9 +175,6 @@ export async function startSelectFlowPopup(
     if (options?.architecture) extra.architecture = options.architecture.toString();
     const url = buildAuthorizeUrl(publishableKey, redirectUri, extra, pkce);
 
-    if (T3K_DEBUG) {
-        console.debug("PiPedal startSelectFlowPopup URL:" + url + " (from buildAuthorizeUrl)");
-    }
     const width = options?.width ?? 480;
     const height = options?.height ?? 700;
     const left = Math.round(window.screenX + (window.outerWidth - width) / 2);
@@ -521,9 +515,6 @@ export async function handleOAuthCallback(
         client_id: publishableKey
     });
 
-    if (T3K_DEBUG) {
-        console.debug("PiPedal /api/v1/oath/token body: " + tokenSearchParams.toString());
-    }
     const res = await fetch(`${T3K_API}/api/v1/oauth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -542,10 +533,6 @@ export async function handleOAuthCallback(
         refresh_token: data.refresh_token,
         expires_at: Date.now() + data.expires_in * 1000,
     };
-
-    if (T3K_DEBUG) {
-        console.debug("PiPedal handleOAuthCallback Response: " + JSON.stringify(data).replace(/\n/g, ' '));
-    }
 
     if (toneId === undefined && modelId === undefined && !canceled) {
         throw new Error('Missing both toneId and modelId in OAuth callback response');
@@ -776,5 +763,4 @@ export class T3KClient {
         URL.revokeObjectURL(url);
     }
 }
-
 

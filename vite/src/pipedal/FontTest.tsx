@@ -34,7 +34,7 @@ function TypeSample(props: { fontFamily: string, cssRef: string, fontWeights: nu
         return () => {
             document.head.removeChild(link);
         };
-    }, []);
+    }, [cssRef]);
 
     return (
         <div>

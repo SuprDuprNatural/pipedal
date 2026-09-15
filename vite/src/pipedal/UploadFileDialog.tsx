@@ -245,15 +245,14 @@ export default class UploadFileDialog extends ResizeResponsiveComponent<UploadFi
                     upload.statusMessage = "Uploaded.";
                     upload.abortController = undefined;
                 } catch (error: any) {
-                    // @ts-ignore: TS2367   // No overlap between FileUploadStatus.Updating and FileUploadStatus.Cancelled
-                    if (upload.status !== FileUploadStatus.Cancelled) {
+                    if ((upload.status as FileUploadStatus) !== FileUploadStatus.Cancelled) {
                         upload.status = FileUploadStatus.Error;
                         if (error instanceof Error) {
                             upload.statusMessage = (error as Error).message;
                         } else if (typeof error === "string") {
                             upload.statusMessage = error as string;
                         } else {
-                            throw new Error("Unrecgnized exception type: " + error.toString());
+                            throw new Error("Unrecognized exception type: " + error.toString());
                         }
                     }
                 }
@@ -291,7 +290,6 @@ export default class UploadFileDialog extends ResizeResponsiveComponent<UploadFi
     private wantsTransfer(fileList: DataTransfer): boolean {
         if (fileList.files.length === 0) return false;
 
-        console.log("File count: " + fileList.files.length);
         for (let i = 0; i < fileList.files.length; ++i) {
             let file = fileList.files[i];
             if (this.wantsFile(file)) return true;

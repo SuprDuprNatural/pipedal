@@ -17,6 +17,9 @@ docs/GpioHardwareControlHandover.md
 # macOS Finder metadata.
 .DS_Store
 
+# Python bytecode caches.
+__pycache__/
+
 react/package-lock.json
 
 src/dbus/bluez_adaptor.h

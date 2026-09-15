@@ -72,7 +72,6 @@ class NoChangePassword extends React.Component<NoChangePasswordProps, NoChangePa
 
     textChanged: boolean = false;
     handleFocus(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
-        console.log("onFocus");
         if (!this.state.focused) {
             this.textChanged = false;
             e.target.value = this.state.passwordText;
@@ -81,7 +80,6 @@ class NoChangePassword extends React.Component<NoChangePasswordProps, NoChangePa
         this.setState({ focused: true });
     }
     handleBlur(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
-        console.log("onBlur");
         let text = e.target.value as string;
         this.setState({ focused: false, passwordText: text });
         this.props.onPasswordChange(e.target.value);
@@ -94,7 +92,6 @@ class NoChangePassword extends React.Component<NoChangePasswordProps, NoChangePa
     }
 
     render() {
-        console.log("Render  focus: " + this.state.focused)
         let showUnchanged = (this.state.passwordText.length === 0) && this.props.hasPassword && (!this.state.focused);
         let thisDefaultValue = showUnchanged ? "(Unchanged)" : this.props.defaultValue;
 

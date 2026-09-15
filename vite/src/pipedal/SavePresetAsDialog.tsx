@@ -32,18 +32,21 @@ import {PiPedalModel,PiPedalModelFactory} from './PiPedalModel';
 //import TextFieldEx from './TextFieldEx';
 import TextField from '@mui/material/TextField';
 import { BankIndex } from './Banks';
+import OkCancelDialog from './OkCancelDialog';
 
 
 export interface SavePresetAsDialogProps {
     open: boolean,
     defaultName: string,
-    onOk: (bankInstanceId: number, text: string) => void,
+    onOk: (bankInstanceId: number, text: string, overwritePresetId: number) => Promise<void>,
     onClose: () => void
 };
 
 export interface SavePresetAsDialogState {
     selectedBank: number;
     banks: BankIndex;
+    saving: boolean;
+    overwrite?: { bankInstanceId: number; name: string; instanceId: number };
     
     fullScreen: boolean;
 };
@@ -63,6 +66,7 @@ export default class SavePresetAsDialog extends ResizeResponsiveComponent<SavePr
         this.state = {
             banks: this.model.banks.get(),
             selectedBank: this.model.banks.get().selectedBank,
+            saving: false,
             fullScreen: false
 
         };
@@ -95,12 +99,37 @@ export default class SavePresetAsDialog extends ResizeResponsiveComponent<SavePr
     checkForIllegalCharacters(filename: string) {
     }
 
+    private submitting = false;
+
+    private async save(bankInstanceId: number, name: string, overwritePresetId = -1) {
+        if (this.submitting) return;
+        this.submitting = true;
+        this.setState({ saving: true });
+        try {
+            if (overwritePresetId === -1) {
+                const presets = await this.model.requestBankPresets(bankInstanceId);
+                const existing = presets.find(preset => preset.name === name);
+                if (existing) {
+                    this.setState({ overwrite: { bankInstanceId, name, instanceId: existing.instanceId } });
+                    return;
+                }
+            }
+            await this.props.onOk(bankInstanceId, name, overwritePresetId);
+        } catch (error) {
+            if (this.mounted) this.setState({ overwrite: undefined });
+            this.model.showAlert(String(error));
+        } finally {
+            this.submitting = false;
+            if (this.mounted) this.setState({ saving: false });
+        }
+    }
+
     render() {
         let props = this.props;
-        let { open, defaultName, onClose, onOk } = props;
+        let { open, defaultName, onClose } = props;
 
         const handleClose = () => {
-            onClose();
+            if (!this.submitting) onClose();
         };
 
         const handleOk = () => {
@@ -115,7 +144,7 @@ export default class SavePresetAsDialog extends ResizeResponsiveComponent<SavePr
                 return;
             }
             if (text.length === 0) return;
-            onOk(this.state.selectedBank,text);
+            if (!this.state.overwrite) void this.save(this.state.selectedBank, text);
         }
         const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
             // 'keypress' event misbehaves on mobile so we track 'Enter' key via 'keydown' event
@@ -126,19 +155,20 @@ export default class SavePresetAsDialog extends ResizeResponsiveComponent<SavePr
             }
         };
         return (
-            <DialogEx tag="savePresetAs" open={open} fullWidth maxWidth="xs" onClose={handleClose} aria-labelledby="Rename-dialog-title" 
+            <>
+            <DialogEx tag="savePresetAs" open={open} fullWidth maxWidth="xs" onClose={handleClose} aria-labelledby="save-preset-as-title"
                 fullScreen={this.state.fullScreen}
                 style={{userSelect: "none"}}
                 onEnterKey={()=>{}}
                 >
-                    <DialogTitle>
+                    <DialogTitle id="save-preset-as-title">
                         Save Preset As
                     </DialogTitle>
 
                 <DialogContent >
                     <InputLabel style={{ fontSize: "0.75rem", fontWeight: 400, marginTop: 16 }}>Bank</InputLabel>
                     
-                    <Select variant="standard" fullWidth value={this.state.selectedBank} style={{marginBottom: 16}}
+                    <Select disabled={this.state.saving} variant="standard" fullWidth value={this.state.selectedBank} style={{marginBottom: 16}}
                         onChange={(e) => this.setState({ selectedBank: e.target.value as number  })}>
                         {this.state.banks.entries.map((bankEntry) => {
                             return (
@@ -152,6 +182,7 @@ export default class SavePresetAsDialog extends ResizeResponsiveComponent<SavePr
                     </Select>
 
                     <TextField
+                        disabled={this.state.saving}
                         autoFocus={!isTouchUi()}
                         onKeyDown={handleKeyDown}
                         autoComplete="off"
@@ -176,14 +207,23 @@ export default class SavePresetAsDialog extends ResizeResponsiveComponent<SavePr
                     />
                 </DialogContent>
                 <DialogActions style={{flexShrink: 1}}>
-                    <Button onClick={handleClose} variant="dialogSecondary" >
+                    <Button disabled={this.state.saving} onClick={handleClose} variant="dialogSecondary" >
                         Cancel
                     </Button>
-                    <Button onClick={handleOk} variant="dialogPrimary"  >
-                        OK
+                    <Button disabled={this.state.saving} onClick={handleOk} variant="dialogPrimary"  >
+                        {this.state.saving ? "Saving…" : "OK"}
                     </Button>
                 </DialogActions>
             </DialogEx>
+            <OkCancelDialog open={this.state.overwrite !== undefined}
+                text={`Overwrite preset? Replace "${this.state.overwrite?.name ?? ""}" with the current settings?`}
+                okButtonText="Overwrite"
+                onClose={() => { if (!this.submitting) this.setState({ overwrite: undefined }); }}
+                onOk={() => {
+                    const target = this.state.overwrite;
+                    if (target) void this.save(target.bankInstanceId, target.name, target.instanceId);
+                }} />
+            </>
         );
     }
 }

@@ -29,6 +29,7 @@ import { withStyles } from "tss-react/mui";
 import { createStyles } from './WithStyles';
 
 import PresetDialog from './PresetDialog';
+import OledArtworkDialog from './OledArtworkDialog';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Fade from '@mui/material/Fade';
@@ -51,6 +52,7 @@ interface PresetSelectorState {
     presets: PresetIndex;
     enabled: boolean;
     showPresetsDialog: boolean;
+    artworkDialogOpen: boolean;
     showEditPresetsDialog: boolean;
     presetsMenuAnchorRef: HTMLElement | null;
     presetsSubmenuAnchorRef: HTMLElement | null;
@@ -104,6 +106,7 @@ const PresetSelector =
                     enabled: false,
                     compactHorizontalLayoutMenu: this.windowSize.height < this.MENU_THRESHOLD,
                     showPresetsDialog: false,
+                    artworkDialogOpen: false,
                     showEditPresetsDialog: false,
                     presetsMenuAnchorRef: null,
                     presetsSubmenuAnchorRef: null,
@@ -242,16 +245,9 @@ const PresetSelector =
                 return result;
             }
 
-            handleSaveAsDialogOk(bankInstanceId: number, name: string): void {
+            async handleSaveAsDialogOk(bankInstanceId: number, name: string, overwritePresetId: number): Promise<void> {
+                await this.model.saveCurrentPresetAs(bankInstanceId, name, -1, overwritePresetId);
                 this.setState({ saveAsDialogOpen: false });
-
-                this.model.saveCurrentPresetAs(bankInstanceId, name)
-                    .then((instanceId) => {
-                        this.model.loadPreset(instanceId);
-                    })
-                    .catch((error) => {
-                        this.showError(error);
-                    });
             }
             handleImportDialogOk(bankInstanceId: number, presets: number[]): void {
                 this.setState({ importDialogOpen: false });
@@ -424,6 +420,7 @@ const PresetSelector =
 
                                 )}
                                 <Divider />
+                                <MenuItem onClick={() => { this.handlePresetsMenuClose(); this.setState({ artworkDialogOpen: true }); }}>OLED artwork...</MenuItem>
                                 <MenuItem onClick={(e) => { this.handleDownloadPreset(e); }} >Download preset</MenuItem>
                                 <MenuItem onClick={(e) => { this.handleUploadPreset(e) }}>Upload preset</MenuItem>
                                 <Divider />
@@ -444,6 +441,8 @@ const PresetSelector =
                             </Menu>
                             
 
+                        {this.state.artworkDialogOpen && <OledArtworkDialog
+                            onClose={() => this.setState({ artworkDialogOpen: false })} />}
                         {this.state.showPresetsDialog&& (
                             <PresetDialog show={this.state.showPresetsDialog} onDialogClose={() => this.handleDialogClose()}
                             />
@@ -452,9 +451,8 @@ const PresetSelector =
                             <SavePresetAsDialog open={this.state.saveAsDialogOpen}
                                 defaultName={presets.getItem(presets.selectedInstanceId)?.name ?? "My Preset"}
                                 onClose={() => { this.setState({ saveAsDialogOpen: false }) }}
-                                onOk={(bankInstanceId, name) => {
-                                    this.handleSaveAsDialogOk(bankInstanceId, name);
-                                }} />
+                                onOk={(bankInstanceId, name, overwritePresetId) =>
+                                    this.handleSaveAsDialogOk(bankInstanceId, name, overwritePresetId)} />
                         )}
                         {this.state.importDialogOpen && (
                             <ImportPresetFromBankDialog open={this.state.importDialogOpen}

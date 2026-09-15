@@ -63,36 +63,30 @@ export default function DraggableButtonBase(props: DraggableButtonBaseProps) {
     const { onClick, onDoubleClick, onLongPressStart, onLongPressMove: 
         doLongPressMove,onLongPressEnd, longPressDelay,instantMouseLongPress, ...rest } = props;
 
-    let [hTimeout, setHTimeout] = React.useState<number | null>(null);
+    const hTimeout = React.useRef<number | null>(null);
     let [pointerId, setPointerId] = React.useState<number | null>(null);
     let [longPressed, setLongPressed] = React.useState<boolean>(false);
     let [clickSuppressed, setClickSuppressed] = React.useState<boolean>(false);
     let [pointerDownPoint, setPointerDownPoint] = React.useState<Point>({ x: 0, y: 0 });
-    let [ longPressedElement, setLongPressedElement ] = React.useState<HTMLButtonElement | null>(null);
+    const longPressedElement = React.useRef<HTMLButtonElement | null>(null);
     let [lastClick, setLastClick] = React.useState<number | null>(null);
 
-
-    function handleSuppressClick(e: MouseEvent) {
-        e.stopPropagation();
-        e.preventDefault();
-        setSuppressClick(false);
-    }
 
     function setSuppressClick(value: boolean) {
         setClickSuppressed(value);
     }
-  function startLongPress(currentTarget: HTMLButtonElement, e: React.PointerEvent<HTMLButtonElement> | React.MouseEvent<HTMLButtonElement>)
+    function startLongPress(currentTarget: HTMLButtonElement, e: React.PointerEvent<HTMLButtonElement> | React.MouseEvent<HTMLButtonElement>)
     {
-        if (hTimeout !== null) {
-            window.clearTimeout(hTimeout);
-            setHTimeout(null);
+        if (hTimeout.current !== null) {
+            window.clearTimeout(hTimeout.current);
+            hTimeout.current = null;
         }
-        if (props.onLongPressStart) {
-            if (!props.onLongPressStart(currentTarget, e)) {
+        if (onLongPressStart) {
+            if (!onLongPressStart(currentTarget, e)) {
                 return;
             }
         }
-        setLongPressedElement(currentTarget);
+        longPressedElement.current = currentTarget;
         setLongPressed(true);
         setSuppressClick(true);
         currentTarget.style.touchAction = "none"; // prevent scrolling.
@@ -101,16 +95,16 @@ export default function DraggableButtonBase(props: DraggableButtonBaseProps) {
     }
 
     function cancelLongPress() {
-        if (hTimeout !== null) {
-            window.clearTimeout(hTimeout);
-            setHTimeout(null);
+        if (hTimeout.current !== null) {
+            window.clearTimeout(hTimeout.current);
+            hTimeout.current = null;
         }
         setPointerId(null);
         setLongPressed(false);
         setSuppressClick(false);
-        if (longPressedElement) {
-            longPressedElement.style.touchAction = "";
-            setLongPressedElement(null);
+        if (longPressedElement.current) {
+            longPressedElement.current.style.touchAction = "";
+            longPressedElement.current = null;
         }
         if (longPressed) {
             // console.log("DraggableButtonBase: long press canceled");
@@ -119,51 +113,32 @@ export default function DraggableButtonBase(props: DraggableButtonBaseProps) {
 
     function stopLongPress(e: React.PointerEvent<HTMLButtonElement> | React.MouseEvent<HTMLButtonElement>) {
         if (longPressed) {
-            if (props.onLongPressEnd) {
-                props.onLongPressEnd(e);
+            if (onLongPressEnd) {
+                onLongPressEnd(e);
             }
         }
         cancelLongPress();
     }
 
-    const handleTouchMove = (e: TouchEvent) => {
-        if (longPressed) {
-            e.preventDefault(); // Prevent scrolling during long press
-            e.stopPropagation();
-        }
-    }
-    const handleTouchstart = (e: TouchEvent) => {
-        if (longPressed) {
-            e.preventDefault(); // Prevent default touch behavior during long press
-            e.stopPropagation();
-        }
-    }
-
     useEffect(() => {
-
-        let hTouchMove = (e: TouchEvent) => {
-            handleTouchMove(e);
-        }
-        addEventListener("touchmove", hTouchMove, { passive: false, capture: true });
-
-        let hTouchStart = (e: TouchEvent) => {
-            handleTouchstart(e);
-        }
-        addEventListener("touchstart", hTouchStart, { passive: false, capture: true });
-
         return () => {
-            removeEventListener("touchmove", hTouchMove, { capture: true });
-            removeEventListener("touchstart", hTouchStart, { capture: true });
-
-            setSuppressClick(false);
-            cancelLongPress();
+            if (hTimeout.current !== null) {
+                window.clearTimeout(hTimeout.current);
+                hTimeout.current = null;
+            }
+            if (longPressedElement.current) {
+                longPressedElement.current.style.touchAction = "";
+                longPressedElement.current = null;
+            }
         };
     }, []);
 
     useEffect(() => {
         if (clickSuppressed) {
             let hclick = (e: MouseEvent) => {
-                handleSuppressClick(e);
+                e.stopPropagation();
+                e.preventDefault();
+                setClickSuppressed(false);
             };
             window.addEventListener("click",hclick, { capture: true });
             let hTimeout: number | null = null;
@@ -227,9 +202,10 @@ export default function DraggableButtonBase(props: DraggableButtonBaseProps) {
                     if (instantMouseLongPress === true && e.pointerType === "mouse") {
                         delay = 0;
                     }
-                    setHTimeout(window.setTimeout(() => {
+                    hTimeout.current = window.setTimeout(() => {
+                        hTimeout.current = null;
                         startLongPress(currentTarget, e);
-                    }, delay));
+                    }, delay);
                 }
                 e.preventDefault();
                 e.stopPropagation();

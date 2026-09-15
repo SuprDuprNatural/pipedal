@@ -12,6 +12,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 using namespace pipedal;
@@ -590,4 +591,26 @@ TEST_CASE("Reserved peripheral GPIO lines are not opened", "[Build][gpio]")
     REQUIRE_FALSE(statuses[0].connected_);
     REQUIRE(statuses[0].error_ == "GPIO 20 is reserved for test hardware.");
     manager->Close();
+}
+
+TEST_CASE("OLED artwork survives preset serialization and copying", "[gpio][oled]")
+{
+    Pedalboard board = Pedalboard::MakeDefault();
+    OledArtwork image;
+    for (size_t i = 0; i < image.bytes.size(); ++i) image.bytes[i] = static_cast<uint8_t>(i);
+    board.oledArtwork(image);
+    auto copy = board.DeepCopy();
+    REQUIRE(copy.oledArtwork()->bytes == image.bytes);
+    std::stringstream json;
+    json_writer(json).write(copy);
+    Pedalboard loaded;
+    json_reader(json).read(&loaded);
+    REQUIRE(loaded.oledArtwork()->bytes == image.bytes);
+    loaded.oledArtwork(std::nullopt);
+    std::stringstream legacy;
+    json_writer(legacy).write(loaded);
+    REQUIRE(legacy.str().find("oledArtwork") == std::string::npos);
+    Pedalboard oldBoard;
+    json_reader(legacy).read(&oldBoard);
+    REQUIRE_FALSE(oldBoard.oledArtwork().has_value());
 }

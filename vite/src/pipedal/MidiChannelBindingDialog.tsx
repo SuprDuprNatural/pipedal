@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-
 // Copyright (c) Robin E.R. Davies
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -49,6 +47,7 @@ export interface MidiChannelBindingDialogProps {
     midiDevices: AlsaMidiDeviceInfo[];
 }
 
+const SHOW_HELP = false;
 
 
 function MidiChannelBindingDialog(props: MidiChannelBindingDialogProps) {
@@ -165,7 +164,7 @@ function MidiChannelBindingDialog(props: MidiChannelBindingDialogProps) {
                             />
                         } label="Allow Program Changes"
                         />
-                        {false&&( // wait until the implementation stabilizes before exposing the help dialog.
+                        {SHOW_HELP && ( // Wait until the implementation stabilizes before exposing the help dialog.
                             <IconButtonEx
                                 tooltip="Help"
                                 aria-label="help"

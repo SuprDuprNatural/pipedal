@@ -5,8 +5,8 @@ on:
     branches: [ main, dev ]
     paths-ignore:
       - "docs/**"
-  #pull_request:
-  #  branches: [ main ]
+  pull_request:
+    branches: [ main ]
     
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
@@ -21,24 +21,35 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
-    
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: vite/package-lock.json
+
     - name: Install dependencies
       run: |
-        npm view npm get version of @babel/plugin-proposal-private-property-in-object version command
         sudo apt-get update
-        sudo apt install gcc-12 g++-12 libnm-dev
-        sudo apt-get install -y liblilv-dev libboost-dev libjack-jackd2-dev libnl-3-dev libnl-genl-3-dev libsystemd-dev catch
-        sudo apt install -y libasound2-dev
-        sudo apt install -y libwebsocketpp-dev authbind
-        sudo apt install -y libsdbus-c++-dev libsdbus-c++-bin
-        sudo apt install -y libavahi-client-dev libzip-dev libicu-dev apt
-        sudo apt install -y libpipewire-0.3-dev 
-        sudo apt install -y libssl-dev
-        
-        sudo apt install -y librsvg2-dev 
-        git submodule update --init --recursive 
-        ./react-config
+        sudo apt-get install -y libnm-dev liblilv-dev libboost-dev \
+          libjack-jackd2-dev libnl-3-dev libnl-genl-3-dev libsystemd-dev \
+          catch libasound2-dev libwebsocketpp-dev authbind libsdbus-c++-dev \
+          libsdbus-c++-bin libavahi-client-dev libzip-dev libicu-dev apt \
+          libpipewire-0.3-dev libssl-dev librsvg2-dev
+        npm ci --prefix vite
+
+    - name: Frontend and portable regression checks
+      run: |
+        npm run lint --prefix vite
+        node vite/test/preset-save.mjs
+        node vite/test/oled-artwork.mjs
+        node vite/test/knob-drag.mjs
+        python3 test/preset_save_regression.py
+        python3 test/oled_regression.py
+        python3 test/gpio_preset_cooldown.py
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
@@ -53,15 +64,15 @@ jobs:
       env:
          CC:   gcc-13
          CXX:  g++-13
-    #- name: Test
-    #  working-directory: ${{github.workspace}}/build
-    #  # Execute CMake BuiltTest test
-    #  run: ctest -C ${{env.BUILD_TYPE}} -R BuildTest
+    - name: Native regression checks
+      run: |
+        ctest --test-dir build --output-on-failure --timeout 120 -R '^(BuildTest|jsonTest|LatencyCompensation)$'
+        build/src/pipedaltest "[gpio]"
     - name: Make Package
       run: ./makePackage.sh
        
     - name: Generate Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
           name: artifact
           path: |

@@ -55,7 +55,7 @@ import Toolbar from '@mui/material/Toolbar';
 import WithStyles from './WithStyles';
 import { withStyles } from "tss-react/mui";
 import CircularProgress from '@mui/material/CircularProgress';
-import { pathConcat, pathParentDirectory, pathFileName, pathFileNameOnly, pathExtension } from './FileUtils'; './FileUtils';
+import { pathConcat, pathParentDirectory, pathFileName, pathFileNameOnly, pathExtension } from './FileUtils';
 
 
 import ResizeResponsiveComponent from './ResizeResponsiveComponent';

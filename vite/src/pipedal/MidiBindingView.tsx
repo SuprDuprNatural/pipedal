@@ -199,7 +199,6 @@ const MidiBindingView =
                 if (!this.props.uiControl) return;
                 let newBinding = this.props.midiBinding.clone();
                 newBinding.maxValue = this.props.uiControl.valueToRange(value);
-                console.log(value, newBinding.maxValue)
                 this.props.onChange(this.props.instanceId, newBinding);
             }
 

@@ -1,50 +1,48 @@
-### PiPedal Architecture
+# PiPedal architecture
 
-The PiPedal client is a web application written in React Framework, using Typescript. The bulk of the application is static content
-compiled from TypeScript sources, using React Framework tools. The static content is fetched from a web server hosted by the  `pipedald` service. Once loaded, the web application
-opens a web socket connection to the `pipedald` server. Dynamic content is fetched over the web socket. The web client controls the server application using asynchronous json messages that are exchanged over the web socket. Changes to the state of the server application are propagated to all connected web clients via events that are fired by the server application over the web socket. Changes to the UI are (for the most part) implemented by binding state in the  client-side PiPedalModel with state data in the React Framework view model.
+PiPedal consists of a browser client, an unprivileged audio/server process, and
+a small privileged administration service.
 
-The PiPedal server is written in C++. The server relies on an additional service, `pipedaladmind`, which provides
-privileged operations (e.g. shutdown, reboot, and configuration changes) for use by the main `pipedald` service
-which runs on a service account without privileges.
+![PiPedal production architecture](img/Architecture.png)
 
-See figure 1 for a diagram of the high-level architecture of PiPedal.
+## Browser client
 
-![](img/Architecture.png)
+The client is a React application written in TypeScript and built with Vite.
+In production, `pipedald` serves its static files. After loading, the client
+opens a WebSocket connection to the same server. Requests and replies use JSON,
+and server events keep every connected client's `PiPedalModel` synchronized
+with the live engine state.
 
-Fig 1. PiPedal Architecture.
+## Server processes
 
-HTML connections to the server are made over port 80 in production, or port 8080 when debugging.
+`pipedald` is the C++ host. It serves HTTP and WebSocket traffic, discovers LV2
+plugins, owns the current pedalboard and preset state, and processes audio. It
+runs under the unprivileged `pipedal_d` service account.
 
-When debugging React code, an instance of the React development server must be started. The development server serves static content on port 3000. To 
-start the development server `cd` to the react directory, and run `./start`.
-Figure 2 shows the architecture of PiPedal when running with the React debug server.
+`pipedaladmind` performs operations that require elevated privileges, including
+shutdown, reboot, and selected system configuration changes. Access to its
+local IPC endpoint is restricted to the `pipedal_d` group.
 
-![](img/DebugArchitecture.png)
+Production commonly uses port 80, although the installer can select another
+port when it is already occupied. The server-generated `/var/config.json`
+describes the active address, port, upload limit, and build mode to the client.
 
-Fig 2. PiPedal architecture when using the React development server.
+## Development topology
 
-To debug React code, connect to the development server, on port 3000, with Chrome. To access the Chrome debugger, press F12. You should be able to browse the React source files from within the Chrome debugger. Load the typescript source file in the Chrome debugger. Once you have done that, you should be able to debug the Typescript code directly. Chrome will automatically detect that it is connected to a React debug server, and will automatically download symbol and map files from the React development server.
+During frontend development, Vite serves the application on port 5173 and
+proxies dynamic routes to a running `pipedald` instance:
 
-When using the React development server, the web client can be configured to make web socket connections to either a debug version of the server, with a web server at port 8080, or a production server, with a web server at port 80. When running with the React development server, edit 
+![PiPedal development architecture](img/DebugArchitecture.png)
 
-`react/public/var/config.json:`
+Set the backend without editing source or generated files:
+
+```sh
+cd vite
+PIPEDAL_SERVER=http://127.0.0.1:8080 npm run dev
 ```
-{
-    "socket_server_port": 8080,
-    "socket_server_address": "*",
-    "debug": true,
-    "max_upload_size": 1048576,
-    "fakeAndroid": false,
-    "ui_plugins": []
-}
-```
 
-The `debug` value determines whether the web application will disable background context menus. Enabling context menus allows you to select the 'Inspect' menu item, which is useful when debugging HTML content.
+See [Debugging PiPedal](Debugging.md) for the complete development workflow.
 
-The `fakeAndroid` setting determines whether the web application will use touch-interface interactions instead of mouse-interface interactions. There are a number of subtle adaptations the web app makes to accommodate touch interfaces.
+---
 
-Note that, when connecting directly to the pipedald web server on port 80, or port 8080, the web server intercepts all requests to documents in the `var` directory, including the `var/config.json` file, and instead returns data that reflects the configuration of the pipedald service. The contents of the `public/var` directory will be completely ignored. The `debug` setting will be true if the pipedald service is a Debug build, and will be false if the pipedald service is a Release build. The `fakeAndroid` setting will always be false.
-
------
-[<< How to Debug PiPedal](Debugging.md) | [Up](Documentation.md)
+[Debugging PiPedal](Debugging.md) · [Documentation index](Documentation.md)

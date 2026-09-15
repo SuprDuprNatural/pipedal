@@ -70,7 +70,7 @@ function ControlSlider(props: ControlSliderProps) {
             model.state.removeOnChangedHandler(handleStateChanged);
             model.unmonitorPort(handle);
         };
-    }, [instanceId,controlKey,serverConnected]);
+    }, [controlKey, instanceId, model, serverConnected]);
 
     return (
         <div style={{ display: "flex", flexFlow: "column nowrap" }}>

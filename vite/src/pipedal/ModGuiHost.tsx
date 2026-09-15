@@ -1199,15 +1199,6 @@ function ModGuiHost(props: ModGuiHostProps) {
         }
     }
 
-    if (!plugin.modGui) {
-        return (
-            <div>
-                <Typography variant="h6">No Mod GUI</Typography>
-            </div>
-        );
-    }
-
-    
     function addPortClass(element: Element, selector: string, className: string) {
         let children = element.querySelectorAll(selector);
         // call addClass to each element that matches the selector
@@ -1547,8 +1538,20 @@ function ModGuiHost(props: ModGuiHostProps) {
             }
             mc.length = 0; // Clear the controls array
         };
+        // The imperative MOD GUI is mounted and torn down only when its host,
+        // plugin, or connection readiness changes. The other referenced values
+        // are stable for that lifecycle; adding render-local helpers here would
+        // remount third-party controls on every state update.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [hostDivRef, plugin, ready]);
 
+    if (!plugin.modGui) {
+        return (
+            <div>
+                <Typography variant="h6">No MOD GUI</Typography>
+            </div>
+        );
+    }
 
     return (
         <ModGuiErrorBoundary plugin={props.plugin} onClose={() => { props.onClose(); setErrorMessage(null); }}>

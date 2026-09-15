@@ -62,7 +62,7 @@ function NumericEdit(props: NumericEditProps) {
             setText(value.toString());
             setError(false);
         }
-    }, [value]);
+    }, [focus, value]);
 
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         let newValue = parse(event.target.value);
@@ -304,5 +304,4 @@ export default function TimebaseSelectorDialog(props: TimebaseSelectorDialogProp
         </>
     );
 }
-
 

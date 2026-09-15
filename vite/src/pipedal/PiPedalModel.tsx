@@ -2481,7 +2481,7 @@ export class PiPedalModel //implements PiPedalModel
     }
 
 
-    saveCurrentPresetAs(bankInstanceId: number, newName: string, saveAfterInstanceId = -1): Promise<number> {
+    saveCurrentPresetAs(bankInstanceId: number, newName: string, saveAfterInstanceId = -1, overwritePresetId = -1): Promise<number> {
         // default behaviour is to save after the currently selected preset.
         if (saveAfterInstanceId === -1) {
             saveAfterInstanceId = this.presets.get().selectedInstanceId;
@@ -2490,18 +2490,13 @@ export class PiPedalModel //implements PiPedalModel
             clientId: this.clientId,
             bankInstanceId: bankInstanceId,
             name: newName,
-            saveAfterInstanceId: saveAfterInstanceId
+            saveAfterInstanceId: saveAfterInstanceId,
+            overwritePresetId: overwritePresetId
 
         };
 
         return nullCast(this.webSocket)
-            .request<number>("saveCurrentPresetAs", request)
-            .then((newPresetId) => {
-                if (bankInstanceId === this.banks.get().selectedBank) {
-                    this.loadPreset(newPresetId);
-                }
-                return newPresetId;
-            });
+            .request<number>("saveCurrentPresetAs", request);
     }
 
     getUpdateStatus(): Promise<UpdateStatus> {
@@ -2809,7 +2804,7 @@ export class PiPedalModel //implements PiPedalModel
                 try {
                     let item = pedalboard.getItem(instanceId);
                     if (item) {
-                        if (item.pathProperties.hasOwnProperty(uri)) {
+                        if (Object.prototype.hasOwnProperty.call(item.pathProperties, uri)) {
                             let value = item.pathProperties[uri];
                             let jsonValue = JSON.parse(value);
                             resolve(jsonValue as Type);
@@ -3018,6 +3013,10 @@ export class PiPedalModel //implements PiPedalModel
                 this.gpioInputStatuses.set(
                     this.gpioInputStatuses.get().filter(status => validInputIds.has(status.inputId)));
             });
+    }
+
+    async setOledArtwork(bankId: number, presetId: number, artwork?: number[]): Promise<void> {
+        await this.getWebSocket().request<boolean>("setOledArtwork", [bankId, presetId, artwork ?? null]);
     }
 
     setGpioBindings(bindings: GpioBinding[]): void {
@@ -3759,7 +3758,6 @@ export class PiPedalModel //implements PiPedalModel
 
 
     reloadPage() {
-        // eslint-disable-next-line no-restricted-globals
         let url = window.location.href.split('#')[0];
         window.location.href = url;
         //window.location.reload();
@@ -3792,7 +3790,7 @@ export class PiPedalModel //implements PiPedalModel
             }
         }
         if (this.networkChanging_expectHotspot) {
-            let newUrl = await this.detectServer("10.40.0.1");
+            let newUrl = await this.detectServer("192.168.60.1");
             if (newUrl.length !== 0) {
                 return newUrl;
             }
@@ -4138,4 +4136,3 @@ export class PiPedalModelFactory {
 
     }
 };
-

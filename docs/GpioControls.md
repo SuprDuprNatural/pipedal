@@ -163,6 +163,9 @@ for effect on/bypass or snapshots. Supported actions include:
 - select, advance, or go back through snapshots;
 - next or previous bank.
 
+Mapped preset and bank changes have a shared 100 ms cooldown after loading to
+suppress duplicate button presses. Other mapped actions are unaffected.
+
 Add several mappings with the same input to control several targets together. Mappings are part of the current preset, so save the preset after editing them.
 
 ### Input behavior
@@ -216,6 +219,7 @@ The SSD1306 settings include:
 - temporary preset/action message time;
 - waveform view enabled/disabled and input/output source;
 - passive screen (four parameters, waveform, tuner, or blank);
+- preset name on load, optional preset artwork, and optional swipe reveal;
 - OLED refresh interval and 180-degree rotation.
 
 The parameter display has four compact columns. Each shows a knob indicator,
@@ -233,6 +237,53 @@ message time, the OLED returns to the previously selected screen.
 
 Choose the passive screen from the hardware settings page or the top navigation
 layer: four parameters, live waveform, built-in chromatic strobe tuner, or blank.
+
+### Boot logo and preset pictures
+
+The SuprDuprNatural boot logo uses white lettering on black at the OLED's
+128×64 resolution. It wipes in from left to right over 800 ms, holds until
+2.2 seconds, then gives way to the passive screen. Hardware activity dismisses
+it immediately. It appears once per service start; reconnecting a browser or
+OLED does not replay it. Blank mode suppresses the logo.
+
+**Preset name on load** is on by default. Each successful preset load shows
+the name for two seconds, including loads from the browser, MIDI, mapped
+switches, next/previous, bank changes and ANO Select. **Preset artwork** can be
+enabled independently; when the loaded preset has artwork, it replaces the
+name and fills the lower display. Browsing, editing and saving do not trigger
+a notice. Selecting a preset with ANO returns to Parameters and clears the
+browsing screen. Another load replaces the notice. The preset name or artwork
+has priority for the full two seconds. Controls keep responding,
+but their parameter/action and navigation screens wait until the notice ends.
+Only the latest pending screen appears, with its normal timeout starting when
+it becomes visible. A new preset clears feedback pending from the previous one.
+Refreshing a mapped parameter or bypass from its current input position during
+a preset load is silent and does not create pending feedback.
+
+The notice occupies the bottom 40 pixels. The tuner's strobe and pitch needle
+above it stay live; the complete tuner returns when the notice expires. The
+same lower strip is used in Parameters and Waveform modes. Blank stays blank.
+Long names use two lines with an ellipsis; unsupported characters become one
+question mark per character.
+
+To add a picture:
+
+1. Open the preset's menu and choose **OLED artwork…**.
+2. Choose a local PNG, JPEG or WebP, up to 2 MiB and 2048×2048 pixels.
+3. Choose **Fit whole image** or **Crop to fill**, then adjust **Threshold**
+   and **Invert** using the enlarged OLED preview.
+4. Choose **Apply**, then save the preset. **Remove** clears the picture when
+   applied; it also needs a preset save to become permanent.
+5. In Hardware display settings, turn on **Preset artwork**. Turn on
+   **Swipe reveal** for a 300 ms left-to-right picture reveal. Both are off
+   by default. The picture replaces the preset name while it is visible.
+
+Pictures are static, monochrome 128×40 bitmaps. They travel with preset copies,
+Save As, overwrites and bank/preset downloads and uploads. No image files need
+to be installed on the Pi. The display uses the configured refresh interval;
+animations do not increase I²C traffic by raising the frame rate.
+
+### Live waveform and tuner
 
 The tuner analyses a lock-free copy of the main input and does not need a tuner effect in the current preset. It reuses the SuprTuner bass-first 18–500 Hz NSDF design, including low-B acquisition, nearest-note/cents output, and octave-normalized strobe motion. Analysis only runs while the tuner screen is selected. The audio path is never altered.
 

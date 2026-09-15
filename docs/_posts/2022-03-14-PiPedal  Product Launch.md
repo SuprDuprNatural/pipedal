@@ -21,7 +21,7 @@ __Ottawa, Canada__ —  Robin Davies is pleased to announce the public launch of
 
 PiPedal allows guitarists to use a cheap Raspberry Pi 4 as a guitar effects pedal. PiPedal provides a touch-friendly web interface over a Wi-Fi hotspot, that allows remote configuration and control of PiPedal guitar effect chains using a connected phone or tablet. This allows guitarists to clip a phone or tablet onto a microphone stand in order to control PiPedal during live performance.
 
-PiPedal includes a basic set of guitar effects from the [ToobAmp](https://githumb.com/rerdavies/ToobAmp) LV2 plugin collection. But users can easily install [other LV2 guitar plugins](https://rerdavies.github.io/pipedal/UsingLv2Plugins.html) for use with PiPedal. 
+PiPedal includes a basic set of guitar effects from the [ToobAmp](https://github.com/rerdavies/ToobAmp) LV2 plugin collection. Users can also install [other LV2 guitar plugins](https://rerdavies.github.io/pipedal/UsingLv2Plugins.html).
 
 <a href="/pipedal/gallery/rig.jpg"><img src="/pipedal/gallery/rig.jpg" width="95%" /></a>
 
@@ -35,7 +35,7 @@ The lead developer for the project is Robin Davies -- a professional software de
 
 &nbsp;&nbsp;&nbsp;"Initially, the project was intended for personal use; but as I got further in, it became more and more compelling, and more and more apparent that I needed to share what I was doing. And so PiPedal came into the world."
 
-Robin Davies is currently [seeking sponsors](https:://github.com/sponsors/rerdavies) for the PiPedal project in order to allow continued open-source development of the project.
+Robin Davies is [seeking sponsors](https://github.com/sponsors/rerdavies) to support continued open-source development of PiPedal.
 
 Links:
 
@@ -51,6 +51,5 @@ Robin Davies is a professional software developer with over 40 years of experien
 
 
 --30--
-
 
 

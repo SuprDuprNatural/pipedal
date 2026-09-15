@@ -86,6 +86,9 @@ export class GpioDisplaySettings {
         this.rotate180 = input?.rotate180 ?? false;
         this.contrast = input?.contrast ?? 160;
         this.passiveMode = input?.passiveMode ?? GpioDisplayMode.Controls;
+        this.presetNameOnLoad = input?.presetNameOnLoad ?? true;
+        this.presetArtwork = input?.presetArtwork ?? false;
+        this.swipeReveal = input?.swipeReveal ?? false;
         return this;
     }
     clone(): GpioDisplaySettings { return new GpioDisplaySettings().deserialize(this); }
@@ -99,6 +102,9 @@ export class GpioDisplaySettings {
     rotate180: boolean = false;
     contrast: number = 160;
     passiveMode: GpioDisplayMode = GpioDisplayMode.Controls;
+    presetNameOnLoad: boolean = true;
+    presetArtwork: boolean = false;
+    swipeReveal: boolean = false;
 }
 
 export enum GpioDisplayMode {

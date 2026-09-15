@@ -20,8 +20,17 @@ endif()
 
 set(BUILD_DIRECTORY ${PROJECT_SOURCE_DIR}/vite/dist)
 
-# Keep added custom faces in the incremental UI build dependencies.
-file(GLOB SUPR_UI_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/pipedal/Supr*.tsx")
+# Track the complete source and public trees so new UI modules and assets cannot
+# leave an otherwise successful incremental build with a stale bundle.
+file(GLOB_RECURSE VITE_BUILD_INPUTS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*"
+    "${CMAKE_CURRENT_SOURCE_DIR}/public/*")
+file(GLOB VITE_BUILD_CONFIG CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.sh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.ts")
 
 
 add_custom_command(
@@ -31,7 +40,8 @@ add_custom_command(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/vite
 
     DEPENDS
-        ${SUPR_UI_SOURCES}
+        ${VITE_BUILD_INPUTS}
+        ${VITE_BUILD_CONFIG}
         # find public src *.json *.ts  -type f >/tmp/tmp.txt                    
     public/css/modGui.css
     public/css/roboto.css
@@ -39,12 +49,10 @@ add_custom_command(
     public/var/current_pedalboard.json
     public/var/uiplugins.json
     public/var/plugin_classes.json
-    public/testTone300Popup.html
     public/licenses/t3k_license.html
     public/favicon.ico
     public/iso_codes.json
     public/serve.json
-    public/t3k/handleTone3000download.html
     public/img/fx_oscillator.svg
     public/img/ic_presets_white.svg
     public/img/BlackKnob.png
@@ -124,7 +132,6 @@ add_custom_command(
     public/manifest.json
     public/robots.txt
     public/logo512.png
-    public/testTone300Select.html
     public/fonts/Roboto-Thin.woff2
     public/fonts/epf/epf_lul-webfont.woff
     public/fonts/epf/stylesheet.css
@@ -249,7 +256,6 @@ add_custom_command(
     src/pipedal/WifiDirectConfigDialog.tsx
     src/pipedal/ToobInputStageView.tsx
     src/pipedal/RadioSelectDialog.tsx
-    src/pipedal/Tone3000Downloader.tsx.bak
     src/pipedal/ChannelRouterUiControl.tsx
     src/pipedal/SafeFilename.tsx
     src/pipedal/ToobNamView.tsx
@@ -260,7 +266,6 @@ add_custom_command(
     src/pipedal/Tone3000DownloadProgress.tsx
     src/pipedal/ChannelRouterSettingsDialog.tsx
     src/pipedal/DraggableGrid.tsx
-    src/pipedal/Tone3000AuthComplete.tsx
     src/pipedal/OkDialog.tsx
     src/pipedal/ChannelRouterSettings.tsx
     src/pipedal/SystemMidiBindingView.tsx
@@ -401,7 +406,6 @@ add_custom_command(
     src/pipedal/Updater.tsx
     src/pipedal/VuMeter.tsx
     src/assets/react.svg
-    src/t3k_response.tsx
     src/vite-env.d.ts
     src/main.tsx
     src/index.css

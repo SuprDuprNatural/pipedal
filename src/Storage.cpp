@@ -824,10 +824,13 @@ void Storage::SaveBankFile(const std::string& name, const BankFile& bankFile)
     }
     try
     {
-        pipedal::ofstream_synced s;
+        std::ofstream s;
+        s.exceptions(std::ios::failbit | std::ios::badbit);
         s.open(fileName, std::ios_base::trunc);
         json_writer writer(s, true);
         writer.write(bankFile);
+        s.close();
+        FileSystemSync();
         if (std::filesystem::exists(backupFile))
         {
             std::filesystem::remove(backupFile);
@@ -869,39 +872,42 @@ bool Storage::LoadPreset(int64_t instanceId)
 }
 void Storage::SaveCurrentPreset(const Pedalboard& pedalboard)
 {
-    auto& item = currentBank.getItem(currentBank.selectedPreset());
-    item.preset(pedalboard);
-    SaveCurrentBank();
+    const auto& item = currentBank.getItem(currentBank.selectedPreset());
+    SaveCurrentPresetAs(pedalboard, bankIndex.selectedBank(), item.preset().name(), -1, item.instanceId());
 }
-int64_t Storage::SaveCurrentPresetAs(const Pedalboard& pedalboard, int64_t bankInstanceId, const std::string& name, int64_t saveAfterInstanceId)
+int64_t Storage::SaveCurrentPresetAs(const Pedalboard& pedalboard, int64_t bankInstanceId, const std::string& name, int64_t saveAfterInstanceId, int64_t overwritePresetId)
 {
+    if (name.empty())
+        throw PiPedalStateException("Preset name must not be empty.");
     Pedalboard newPedalboard = pedalboard;
     newPedalboard.name(name);
-
-    if (bankInstanceId == this->bankIndex.selectedBank())
+    const bool isCurrentBank = bankInstanceId == this->bankIndex.selectedBank();
+    auto indexEntry = this->bankIndex.getBankIndexEntry(bankInstanceId);
+    BankFile bankFile;
+    if (isCurrentBank)
     {
-        int64_t newInstanceId = currentBank.addPreset(newPedalboard, saveAfterInstanceId);
-        currentBank.selectedPreset(newInstanceId);
-        SaveCurrentBank();
-        return newInstanceId;
+        // Stage the change so a failed write leaves selection and saved data intact.
+        bankFile.name(currentBank.name());
+        bankFile.nextInstanceId(currentBank.nextInstanceId());
+        bankFile.selectedPreset(currentBank.selectedPreset());
+        for (const auto& entry : currentBank.presets())
+            bankFile.presets().push_back(std::make_unique<BankFileEntry>(*entry));
     }
     else
     {
-        auto indexEntry = this->bankIndex.getBankIndexEntry(bankInstanceId);
-
-        try
-        {
-            BankFile bankFile;
-            LoadBankFile(indexEntry.name(), &(bankFile));
-            int64_t newInstanceId = bankFile.addPreset(newPedalboard, -1);
-            SaveBankFile(indexEntry.name(), bankFile);
-            return -1;
-        }
-        catch (const std::exception& e)
-        {
-            throw std::logic_error(SS("Bank file corrupted. " << e.what() << "(" << GetBankFileName(indexEntry.name()) << ")"));
-        }
+        LoadBankFile(indexEntry.name(), &bankFile);
     }
+    int64_t newInstanceId = bankFile.savePreset(newPedalboard,
+        isCurrentBank ? saveAfterInstanceId : -1, overwritePresetId);
+    if (isCurrentBank)
+        bankFile.selectedPreset(newInstanceId);
+    SaveBankFile(indexEntry.name(), bankFile);
+    if (isCurrentBank)
+    {
+        currentBank = std::move(bankFile);
+        return newInstanceId;
+    }
+    return -1;
 }
 
 static std::string stripNumericSuffix(const std::string& name)
@@ -1028,6 +1034,15 @@ int64_t Storage::CopyPresetsToBank(int64_t bankInstanceId, const std::vector<int
     return -1;
 }
 
+// Sort published lists without changing stored MIDI program-number positions.
+static void SortPresetEntries(std::vector<PresetIndexEntry>& entries)
+{
+    auto collator = Locale::GetInstance()->GetCollator();
+    std::stable_sort(entries.begin(), entries.end(), [collator](const auto& left, const auto& right) {
+        return collator->Compare(left.name(), right.name()) < 0;
+    });
+}
+
 std::vector<PresetIndexEntry> Storage::RequestBankPresets(int64_t bankInstanceId)
 {
     auto indexEntry = this->bankIndex.getBankIndexEntry(bankInstanceId);
@@ -1040,6 +1055,7 @@ std::vector<PresetIndexEntry> Storage::RequestBankPresets(int64_t bankInstanceId
         result.push_back(
             PresetIndexEntry(preset->instanceId(), preset->preset().name()));
     }
+    SortPresetEntries(result);
     return result;
 }
 
@@ -1089,7 +1105,9 @@ void Storage::GetPresetIndex(PresetIndex* pResult)
         entry.name(item->preset().name());
         pResult->presets().push_back(entry);
     }
+    SortPresetEntries(pResult->presets());
 }
+
 int64_t Storage::GetPresetByProgramNumber(uint8_t program) const
 {
     if (program >= currentBank.presets().size())

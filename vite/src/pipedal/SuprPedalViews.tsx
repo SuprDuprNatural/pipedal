@@ -103,7 +103,7 @@ const SuprCompressorView = makePanelView((ctx) => [
                 {
                     panelGroup: "column",
                     items: [
-                        { supr: "makeup", step: 3, showReadout: true, showPointer: true },
+                        { supr: "makeup", showReadout: true, showPointer: true },
                         { supr: "blend", marks: "home" },
                         { supr: "schpf", marks: "home" }
                     ],
@@ -335,7 +335,7 @@ const SuprSansView = makePanelView(() => [
             rows: [
                 [{ supr: "air", hideLabel: true, buttonText: "AIR\nLIFT" }],
                 [{ supr: "rumble", hideLabel: true, buttonText: "RUMBLE\nCUT" }],
-                [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+                [{ supr: "level", showReadout: true, showPointer: true }]
             ]
         }]
     },
@@ -351,7 +351,7 @@ const SuprFuzzView = makePanelView(() => [
                     { supr: "tone", marks: "endpoints" }
                 ],
                 [{ supr: "gate" }, { supr: "blend", marks: "endpoints" }],
-                [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+                [{ supr: "level", showReadout: true, showPointer: true }]
             ]
         }]
     }
@@ -397,7 +397,7 @@ const bandStrip = (name: string, comp: string, drive: string,
             rows: [
                 [meteredKnob(comp, grPort, ctx.instanceId, "down", "cut")],
                 [meteredKnob(drive, drvPort, ctx.instanceId, "up", "boost")],
-                [{ supr: level, step: 3, showReadout: true, showPointer: true }]
+                [{ supr: level, showReadout: true, showPointer: true }]
             ]
         }]
     });
@@ -419,7 +419,7 @@ const SuprBandView = makePanelView((ctx) => [
             centerRows: true,
             rows: [
                 [{ supr: "blend", marks: "home" }],
-                [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+                [{ supr: "level", showReadout: true, showPointer: true }]
             ]
         }]
     },
@@ -504,7 +504,7 @@ const SuprTransientView = makePanelView((ctx) => ({
                 rows: [
                     [{ supr: "schpf", marks: "home" }],
                     [{ supr: "focus", marks: "home" }],
-                    [{ supr: "level", step: 3, showReadout: true, showPointer: true }]
+                    [{ supr: "level", showReadout: true, showPointer: true }]
                 ]
             }]
         },
@@ -737,7 +737,7 @@ const SuprForgeView = makePanelView((ctx) => ({
         ] }] },
         { sections: [{ label: "Output", rows: [
             [{ panelGroup: "row", align: "flex-start", items: [
-                { supr: "level", step: 3, showReadout: true, showPointer: true },
+                { supr: "level", showReadout: true, showPointer: true },
                 // Match the continuous knobs' 100px slot so Gate stays aligned.
                 (<div key="forge_level_slot" aria-hidden="true" style={{ width: 0, height: 100 }} />)
             ] }],

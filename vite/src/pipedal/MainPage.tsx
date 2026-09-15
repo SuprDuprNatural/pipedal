@@ -109,7 +109,6 @@ const DISPLAY_AUTHOR_THRESHHOLD = 750;
 const DISPLAY_AUTHOR_SPLIT_THRESHOLD = 500;
 const HORIZONTAL_CONTROL_SCROLL_HEIGHT_BREAK = 500;
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 // const HORIZONTAL_LAYOUT_MQ = "@media (max-height: " + HORIZONTAL_CONTROL_SCROLL_HEIGHT_BREAK + "px)";
 
 const styles = ({ palette }: Theme) => {

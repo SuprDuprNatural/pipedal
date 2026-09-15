@@ -21,6 +21,7 @@
 #pragma once
 
 #include "GpioTuner.hpp"
+#include "OledArtwork.hpp"
 #include "json.hpp"
 #include <algorithm>
 #include <array>
@@ -119,6 +120,9 @@ namespace pipedal
         bool rotate180_ = false;
         int32_t contrast_ = 160;
         int32_t passiveMode_ = 0; // GpioDisplayMode wire value.
+        bool presetNameOnLoad_ = true;
+        bool presetArtwork_ = false;
+        bool swipeReveal_ = false;
 
         DECLARE_JSON_MAP(GpioDisplaySettings);
     };
@@ -557,6 +561,9 @@ namespace pipedal
         virtual void SetTunerSampleProvider(TunerSampleProvider callback) = 0;
         virtual void ShowDisplayMessage(const GpioDisplayMessage &message) = 0;
         virtual void ClearDisplayMessage() = 0;
+        virtual void ShowLoadedPreset(int64_t bankId, int64_t presetId,
+            const std::string &name, const std::optional<OledArtwork> &artwork) = 0;
+        virtual void DismissBootLogo() = 0;
         virtual void ShowControlDashboard(const GpioDisplayDashboard &dashboard) = 0;
         virtual void ShowTemporaryControlDashboard(const GpioDisplayDashboard &dashboard) = 0;
         virtual void ShowTemporaryMenu(const GpioDisplayMenu &menu) = 0;

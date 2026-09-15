@@ -554,6 +554,8 @@ JSON_MAP_BEGIN(Pedalboard)
     JSON_MAP_REFERENCE(Pedalboard,selectedSnapshot)
     JSON_MAP_REFERENCE(Pedalboard,selectedPlugin)
     JSON_MAP_REFERENCE(Pedalboard,gpioBindings)
+    JSON_MAP_REFERENCE_CONDITIONAL(Pedalboard,oledArtwork,
+        [](const Pedalboard *, const std::optional<OledArtwork> &value) { return value.has_value(); })
     JSON_MAP_REFERENCE(Pedalboard,gpioScrollInstanceId)
     JSON_MAP_REFERENCE(Pedalboard,gpioScrollSymbol)
 JSON_MAP_END()
@@ -572,4 +574,3 @@ JSON_MAP_BEGIN(Snapshot)
     JSON_MAP_REFERENCE(Snapshot,color)
     JSON_MAP_REFERENCE(Snapshot,values)
 JSON_MAP_END()
-

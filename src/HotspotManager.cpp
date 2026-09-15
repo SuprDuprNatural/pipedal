@@ -895,11 +895,11 @@ void HotspotManagerImpl::StartHotspot()
             wirelessSecurity["pairwise"] = sdbus::Variant(std::vector<std::string>{"ccmp"});
 
 
-            // IPv4 shared method: NM will configure NAT and DHCP; static address is fine.
+            // IPv4 shared method: NetworkManager configures NAT and DHCP; a static address is fine.
             settings["ipv4"]["method"] = sdbus::Variant("shared");
-            // For IPv6, use ignore to avoid advertising IPv6 if not needed; shared IPv6 is less common and can cause issues.
+            // Ignore IPv6 to avoid advertising an unused local network.
             settings["ipv6"]["method"] = sdbus::Variant("ignore");
-            // If IPv6 were used, addr-gen-mode would be numeric enum; with method=ignore, omit it.
+            // With method=ignore, omit the numeric addr-gen-mode setting.
 
             ////////////////////////////////////////////////////////////////
 

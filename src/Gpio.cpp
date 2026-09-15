@@ -3,6 +3,8 @@
 
 #include "pch.h"
 #include "Gpio.hpp"
+#include "SuprDuprBootLogo.hpp"
+#include "Utf8Utils.hpp"
 #include "Lv2Log.hpp"
 
 #include <algorithm>
@@ -69,6 +71,9 @@ JSON_MAP_REFERENCE(GpioDisplaySettings, refreshIntervalMs)
 JSON_MAP_REFERENCE(GpioDisplaySettings, rotate180)
 JSON_MAP_REFERENCE(GpioDisplaySettings, contrast)
 JSON_MAP_REFERENCE(GpioDisplaySettings, passiveMode)
+JSON_MAP_REFERENCE(GpioDisplaySettings, presetNameOnLoad)
+JSON_MAP_REFERENCE(GpioDisplaySettings, presetArtwork)
+JSON_MAP_REFERENCE(GpioDisplaySettings, swipeReveal)
 JSON_MAP_END()
 
 JSON_MAP_BEGIN(GpioLedMatrixSettings)
@@ -631,7 +636,7 @@ namespace
             return SendCommands(init, sizeof(init), error);
         }
 
-        bool DrawMessage(const GpioDisplayMessage &message, std::string *error)
+        void DrawMessage(const GpioDisplayMessage &message)
         {
             Clear();
             DrawText(0, 0, message.title, 1);
@@ -644,10 +649,10 @@ namespace
                 int width = static_cast<int>(std::clamp(message.normalizedValue, 0.0f, 1.0f) * 124.0f);
                 FillRect(2, 57, width, 5);
             }
-            return Flush(error);
+            return;
         }
 
-        bool DrawWaveform(const std::array<float, 128> &samples, bool output, std::string *error)
+        void DrawWaveform(const std::array<float, 128> &samples, bool output)
         {
             Clear();
             DrawText(0, 0, output ? "OUTPUT WAVEFORM" : "INPUT WAVEFORM", 1);
@@ -664,10 +669,10 @@ namespace
                 DrawLine(x == 0 ? x : x - 1, previousY, x, y);
                 previousY = y;
             }
-            return Flush(error);
+            return;
         }
 
-        bool DrawDashboard(const GpioDisplayDashboard &dashboard, std::string *error)
+        void DrawDashboard(const GpioDisplayDashboard &dashboard)
         {
             Clear();
             if (std::none_of(
@@ -676,7 +681,7 @@ namespace
             {
                 DrawTextCentered(64, 20, "NO PARAMETERS", 1, 21);
                 DrawTextCentered(64, 34, "SELECT AN EFFECT", 1, 21);
-                return Flush(error);
+                return;
             }
 
             // Give each contiguous effect its own header spanning exactly the
@@ -723,10 +728,10 @@ namespace
                     dashboard.controls[slot],
                     dashboard.activeSlot == static_cast<int32_t>(slot + 1));
             DrawScrollBar(dashboard.scrollIndex, dashboard.scrollPositions);
-            return Flush(error);
+            return;
         }
 
-        bool DrawMenu(const GpioDisplayMenu &menu, std::string *error)
+        void DrawMenu(const GpioDisplayMenu &menu)
         {
             Clear();
             if (menu.items.empty())
@@ -808,10 +813,10 @@ namespace
                         1);
                 }
             }
-            return Flush(error);
+            return;
         }
 
-        bool DrawTuner(const GpioTunerFrame &frame, std::string *error)
+        void DrawTuner(const GpioTunerFrame &frame)
         {
             Clear();
             const bool locked = frame.Locked();
@@ -878,23 +883,73 @@ namespace
                 const std::string text = errorText.str();
                 DrawText(128 - static_cast<int>(text.size()) * 6, 56, text, 1);
             }
-            return Flush(error);
+            return;
         }
 
-        bool DrawIdle(std::string *error)
+        void DrawIdle()
         {
             Clear();
             DrawText(22, 24, "PIPEDAL", 2);
-            return Flush(error);
+            return;
         }
 
-        bool DrawBlank(std::string *error)
+        void DrawBlank()
         {
             Clear();
-            return Flush(error);
+            return;
+        }
+
+        void DrawBootLogo(int columns)
+        {
+            Clear();
+            DrawBitmap(SuprDuprBootLogo.data(), 0, 64, columns);
+        }
+
+        void DrawPresetNotice(const std::string &name,
+            const std::optional<OledArtwork> &artwork, int columns)
+        {
+            // SSD1306 pages 0..2 contain the live strobe and pitch needle.
+            std::fill(framebuffer_.begin() + 3 * 128, framebuffer_.end(), 0);
+            if (artwork)
+            {
+                DrawBitmap(artwork->bytes.data(), 24, 40, columns);
+                return;
+            }
+            const auto lines = PresetNameLines(name);
+            const int y = lines[1].empty() ? 40 : 35;
+            DrawTextCentered(64, y, lines[0], 1, 21);
+            DrawTextCentered(64, y + 10, lines[1], 1, 21);
+        }
+
+        static std::array<std::string, 2> PresetNameLines(const std::string &name)
+        {
+            std::string text;
+            // One fallback glyph per Unicode code point, never per UTF-8 byte.
+            for (size_t i = 0; i < name.size(); i = Utf8Increment(i, name))
+            {
+                const auto c = static_cast<unsigned char>(name[i]);
+                text += c >= 32 && c < 127 ? static_cast<char>(c) : '?';
+                if (text.size() == 43) break;
+            }
+            if (text.empty()) text = "UNTITLED";
+            if (text.size() > 42) text = text.substr(0, 39) + "...";
+            if (text.size() <= 21) return {text, ""};
+            size_t split = text.rfind(' ', 21);
+            if (split == std::string::npos || split == 0) split = 21;
+            std::string second = text.substr(split + (text[split] == ' ' ? 1 : 0));
+            if (second.size() > 21) second = second.substr(0, 18) + "...";
+            return {text.substr(0, split), second};
         }
 
     private:
+        void DrawBitmap(const uint8_t *bytes, int top, int height, int columns)
+        {
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < std::clamp(columns, 0, 128); ++x)
+                    if (bytes[y * 16 + x / 8] & (0x80 >> (x % 8)))
+                        Pixel(x, top + y);
+        }
+
         static std::array<uint8_t, 5> Glyph(char c)
         {
             if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
@@ -1054,6 +1109,8 @@ namespace
             std::copy(commands, commands + count, data.begin() + 1);
             return device_.Write(data.data(), data.size(), error);
         }
+    public:
+        const std::array<uint8_t, 1024> &FrameBuffer() const { return framebuffer_; }
         bool Flush(std::string *error)
         {
             const uint8_t window[]{0x21,0,127,0x22,0,7};
@@ -1068,6 +1125,7 @@ namespace
             return true;
         }
 
+    private:
         I2cDevice device_;
         std::array<uint8_t, 1024> framebuffer_{};
     };
@@ -1522,9 +1580,27 @@ namespace
             tunerSampleProvider_ = std::move(callback);
         }
 
+        void ShowLoadedPreset(int64_t bankId, int64_t presetId,
+            const std::string &name, const std::optional<OledArtwork> &artwork) override
+        {
+            std::lock_guard lock(displayMutex_);
+            bootUntil_ = {};
+            displayOverlayType_ = 0;
+            displayMessageSequence_++;
+            // Each completed load (including an explicit reload) replaces the notice.
+            presetNotice_ = {bankId, presetId, name, artwork, std::chrono::steady_clock::now()};
+        }
+
+        void DismissBootLogo() override
+        {
+            std::lock_guard lock(displayMutex_);
+            bootUntil_ = {};
+        }
+
         void ShowDisplayMessage(const GpioDisplayMessage &message) override
         {
             std::lock_guard lock(displayMutex_);
+            bootUntil_ = {};
             displayMessage_ = message;
             displayOverlayType_ = 1;
             displayMessageSequence_++;
@@ -1557,6 +1633,7 @@ namespace
             const GpioDisplayDashboard &dashboard) override
         {
             std::lock_guard lock(displayMutex_);
+            bootUntil_ = {};
             displayDashboard_ = dashboard;
             displayOverlayType_ = 2;
             displayMessageSequence_++;
@@ -1565,6 +1642,7 @@ namespace
         void ShowTemporaryMenu(const GpioDisplayMenu &menu) override
         {
             std::lock_guard lock(displayMutex_);
+            bootUntil_ = {};
             displayMenu_ = menu;
             displayOverlayType_ = 3;
             displayMessageSequence_++;
@@ -1623,6 +1701,8 @@ namespace
                 displayMenu_ = {};
                 displayOverlayType_ = 0;
                 displayMessageSequence_ = 0;
+                presetNotice_ = {};
+                bootUntil_ = {};
             }
             tunerResetRequested_.store(true);
             {
@@ -2112,7 +2192,7 @@ namespace
 #endif
         }
 
-        void ProcessDisplay(Ssd1306Display &display, const GpioDisplaySettings &settings,
+        bool ProcessDisplay(Ssd1306Display &display, const GpioDisplaySettings &settings,
                             std::chrono::steady_clock::time_point now, bool force,
                             std::chrono::steady_clock::time_point *nextDraw,
                             uint64_t *seenSequence,
@@ -2123,6 +2203,8 @@ namespace
             GpioDisplayDashboard dashboard;
             GpioDisplayMenu menu;
             GpioDisplayMode mode;
+            PresetNotice notice;
+            std::chrono::steady_clock::time_point bootUntil;
             int32_t overlayType;
             uint64_t sequence;
             {
@@ -2133,50 +2215,25 @@ namespace
                 mode = displayMode_;
                 overlayType = displayOverlayType_;
                 sequence = displayMessageSequence_;
+                notice = presetNotice_;
+                bootUntil = bootUntil_;
             }
-            if (sequence != *seenSequence)
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - notice.start).count();
+            const bool artworkActive = settings.presetArtwork_ && notice.artwork.has_value();
+            const bool noticeActive = (settings.presetNameOnLoad_ || artworkActive) &&
+                mode != GpioDisplayMode::Blank &&
+                notice.presetId != -1 && elapsed >= 0 && elapsed < 2000;
+            // Retain only the latest feedback while the preset owns the screen.
+            // Start its timeout when it can actually become visible.
+            if (!noticeActive && sequence != *seenSequence)
             {
                 *seenSequence = sequence;
                 *overlayUntil = now + std::chrono::milliseconds(settings.overlayTimeoutMs_);
                 force = true;
             }
-            if (!force && now < *nextDraw) return;
+            if (!force && now < *nextDraw) return true;
             *nextDraw = now + std::chrono::milliseconds(settings.refreshIntervalMs_);
-            std::string error;
-            if (overlayType != 0 && now < *overlayUntil)
-            {
-                if (overlayType == 2)
-                    display.DrawDashboard(dashboard, &error);
-                else if (overlayType == 3)
-                    display.DrawMenu(menu, &error);
-                else
-                    display.DrawMessage(message, &error);
-                return;
-            }
-            if (mode == GpioDisplayMode::Controls)
-            {
-                display.DrawDashboard(dashboard, &error);
-                return;
-            }
-            if (mode == GpioDisplayMode::Waveform)
-            {
-                if (settings.waveformEnabled_)
-                {
-                    WaveformProvider provider;
-                    {
-                        std::lock_guard lock(callbackMutex_);
-                        provider = waveformProvider_;
-                    }
-                    std::array<float, 128> samples{};
-                    if (provider && provider(settings.waveformOutput_, &samples))
-                    {
-                        display.DrawWaveform(samples, settings.waveformOutput_, &error);
-                        return;
-                    }
-                }
-                display.DrawIdle(&error);
-                return;
-            }
+            // Continue consuming tuner samples even when a transient screen covers it.
             if (mode == GpioDisplayMode::Tuner)
             {
                 TunerSampleProvider provider;
@@ -2212,17 +2269,54 @@ namespace
                             break;
                     }
                 }
-                display.DrawTuner(tunerAnalyzer_.Frame(), &error);
-                return;
             }
-            if (mode == GpioDisplayMode::Blank)
+            if (!noticeActive && overlayType != 0 && now < *overlayUntil)
             {
-                display.DrawBlank(&error);
-                return;
+                if (overlayType == 2) display.DrawDashboard(dashboard);
+                else if (overlayType == 3) display.DrawMenu(menu);
+                else display.DrawMessage(message);
             }
-            display.DrawIdle(&error);
+            else if (mode == GpioDisplayMode::Blank)
+                display.DrawBlank();
+            else if (now < bootUntil)
+            {
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - (bootUntil - std::chrono::milliseconds(2200))).count();
+                display.DrawBootLogo(static_cast<int>(std::clamp<int64_t>(elapsed * 128 / 800, 0, 128)));
+            }
+            else
+            {
+                if (mode == GpioDisplayMode::Tuner)
+                    display.DrawTuner(tunerAnalyzer_.Frame());
+                else if (mode == GpioDisplayMode::Controls)
+                    display.DrawDashboard(dashboard);
+                else
+                {
+                    WaveformProvider provider;
+                    {
+                        std::lock_guard lock(callbackMutex_);
+                        provider = waveformProvider_;
+                    }
+                    std::array<float, 128> samples{};
+                    if (settings.waveformEnabled_ && provider && provider(settings.waveformOutput_, &samples))
+                        display.DrawWaveform(samples, settings.waveformOutput_);
+                    else display.DrawIdle();
+                }
+                if (noticeActive)
+                {
+                    const int columns = settings.swipeReveal_
+                        ? static_cast<int>(std::min<int64_t>(128, elapsed * 128 / 300)) : 128;
+                    display.DrawPresetNotice(notice.name,
+                        artworkActive ? notice.artwork : std::nullopt, columns);
+                }
+            }
+            std::string error;
+            if (display.Flush(&error)) return true;
+            Lv2Log::warning("GPIO OLED disconnected: %s", error.c_str());
+            return false;
 #else
             (void)display; (void)settings; (void)now; (void)force; (void)nextDraw; (void)seenSequence; (void)overlayUntil;
+            return true;
 #endif
         }
 
@@ -2347,6 +2441,14 @@ namespace
                 if (!displayAvailable)
                     Lv2Log::warning("Unable to open GPIO OLED display: %s", error.c_str());
             }
+            if (displayAvailable && !bootShown_)
+            {
+                std::lock_guard lock(displayMutex_);
+                bootShown_ = true;
+                if (displayMode_ != GpioDisplayMode::Blank)
+                    bootUntil_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(2200);
+            }
+            auto nextDisplayRetry = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             auto nextDisplayDraw = std::chrono::steady_clock::time_point{};
             auto overlayUntil = std::chrono::steady_clock::time_point{};
             uint64_t seenDisplaySequence = 0;
@@ -2366,8 +2468,14 @@ namespace
             {
                 const bool redraw = redrawRequested_.exchange(false);
                 const auto now = std::chrono::steady_clock::now();
+                if (!displayAvailable && settings.display_.enabled_ && now >= nextDisplayRetry)
+                {
+                    std::string error;
+                    displayAvailable = display.Open(settings.display_, &error);
+                    nextDisplayRetry = now + std::chrono::seconds(5);
+                }
                 if (displayAvailable)
-                    ProcessDisplay(
+                    displayAvailable = ProcessDisplay(
                         display, settings.display_, now, redraw,
                         &nextDisplayDraw, &seenDisplaySequence, &overlayUntil);
                 if (ledMatrixAvailable && now >= nextLedMatrixDraw)
@@ -2405,6 +2513,17 @@ namespace
         TunerSampleProvider tunerSampleProvider_;
 
         mutable std::mutex displayMutex_;
+        struct PresetNotice
+        {
+            int64_t bankId = -1;
+            int64_t presetId = -1;
+            std::string name;
+            std::optional<OledArtwork> artwork;
+            std::chrono::steady_clock::time_point start{};
+        };
+        PresetNotice presetNotice_;
+        bool bootShown_ = false;
+        std::chrono::steady_clock::time_point bootUntil_{};
         GpioDisplayMessage displayMessage_;
         GpioDisplayDashboard displayDashboard_;
         GpioDisplayMenu displayMenu_;

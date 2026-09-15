@@ -292,6 +292,10 @@ void TestIlleglUtf8Sequences()
 }   
 TEST_CASE("json variants", "[json_variants][Build][Dev]")
 {
+    // Linked components can retain process-lifetime JSON values (for example
+    // AtomConverter::gEmptyPath). Check this test's allocations, not their total.
+    const auto initialObjects = json_object::allocation_count();
+    const auto initialArrays = json_array::allocation_count();
     {
         TestIlleglUtf8Sequences();
 
@@ -330,6 +334,6 @@ TEST_CASE("json variants", "[json_variants][Build][Dev]")
             x[0] = "def";
         }
     }
-    REQUIRE(json_object::allocation_count() == 0);
-    REQUIRE(json_array::allocation_count() == 0);
+    REQUIRE(json_object::allocation_count() == initialObjects);
+    REQUIRE(json_array::allocation_count() == initialArrays);
 }

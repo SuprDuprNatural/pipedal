@@ -176,7 +176,7 @@ public:
     int64_t GetBankByMidiBankNumber(uint8_t bankNumber);
     const Pedalboard& GetCurrentPreset();
     void SaveCurrentPreset(const Pedalboard&pedalboard);
-    int64_t SaveCurrentPresetAs(const Pedalboard&pedalboard, int64_t bankInstanceId,const std::string&namne,int64_t saveAfterInstanceId = -1);
+    int64_t SaveCurrentPresetAs(const Pedalboard&pedalboard, int64_t bankInstanceId,const std::string&name,int64_t saveAfterInstanceId = -1, int64_t overwritePresetId = -1);
     int64_t GetCurrentPresetId() const;
     
     void GetPresetIndex(PresetIndex*pResult);

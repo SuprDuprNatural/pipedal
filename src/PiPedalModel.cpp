@@ -1196,7 +1196,7 @@ int64_t PiPedalModel::SavePluginPresetAs(int64_t instanceId, const std::string &
     return presetId;
 }
 
-int64_t PiPedalModel::SaveCurrentPresetAs(int64_t clientId, int64_t bankInstanceId, const std::string &name, int64_t saveAfterInstanceId)
+int64_t PiPedalModel::SaveCurrentPresetAs(int64_t clientId, int64_t bankInstanceId, const std::string &name, int64_t saveAfterInstanceId, int64_t overwritePresetId)
 {
     std::lock_guard<std::recursive_mutex> guard{mutex};
 
@@ -1206,7 +1206,14 @@ int64_t PiPedalModel::SaveCurrentPresetAs(int64_t clientId, int64_t bankInstance
 
     UpdateVst3Settings(pedalboard);
     pedalboard.name(name);
-    int64_t result = storage.SaveCurrentPresetAs(pedalboard, bankInstanceId, name, saveAfterInstanceId);
+    int64_t result = storage.SaveCurrentPresetAs(pedalboard, bankInstanceId, name, saveAfterInstanceId, overwritePresetId);
+    if (result != -1)
+    {
+        this->pedalboard = pedalboard;
+        this->SetPresetChanged(clientId, false);
+        // Saving changes metadata, not the running audio graph.
+        this->FirePedalboardChanged(clientId, false);
+    }
     FirePresetsChanged(clientId);
     return result;
 }
@@ -1524,6 +1531,9 @@ void PiPedalModel::LoadPreset(int64_t clientId, int64_t instanceId)
         this->hasPresetChanged = false; // no fire.
         this->FirePedalboardChanged(clientId);
         this->FirePresetsChanged(clientId); // fire now.
+        if (gpioManager)
+            gpioManager->ShowLoadedPreset(storage.GetBanks().selectedBank(), instanceId,
+                pedalboard.name(), pedalboard.oledArtwork());
     }
 }
 
@@ -2411,6 +2421,11 @@ void PiPedalModel::OpenBank(int64_t clientId, int64_t bankId)
     UpdateDefaults(&this->pedalboard);
     this->hasPresetChanged = false;
     this->FirePedalboardChanged(clientId);
+    gpioPendingPresetId = -1;
+    gpioSelectedEffectId = -1;
+    if (gpioManager)
+        gpioManager->ShowLoadedPreset(storage.GetBanks().selectedBank(), storage.GetCurrentPresetId(),
+            pedalboard.name(), pedalboard.oledArtwork());
 }
 
 JackServerSettings PiPedalModel::GetJackServerSettings()
@@ -3277,6 +3292,17 @@ std::vector<GpioInputStatus> PiPedalModel::GetGpioInputStatuses()
     return gpioManager->GetStatuses();
 }
 
+void PiPedalModel::SetOledArtwork(int64_t clientId, int64_t bankId, int64_t presetId,
+    const std::optional<OledArtwork> &artwork)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (bankId != storage.GetBanks().selectedBank() || presetId != storage.GetCurrentPresetId())
+        throw std::invalid_argument("The preset changed. Reopen the artwork editor.");
+    pedalboard.oledArtwork(artwork);
+    FirePedalboardChanged(clientId, false);
+    SetPresetChanged(clientId, true, false);
+}
+
 void PiPedalModel::SetGpioBindings(int64_t clientId, const std::vector<GpioBinding> &bindings)
 {
     if (bindings.size() > 256)
@@ -3806,10 +3832,13 @@ void PiPedalModel::AcceptGpioNavigationSelection()
                                      ? gpioPendingPresetId
                                      : index.selectedInstanceId();
         if (targetId != -1)
+        {
             LoadPreset(-1, targetId);
-        gpioPendingPresetId = -1;
-        gpioSelectedEffectId = -1;
-        ShowGpioNavigationLayer();
+            gpioPendingPresetId = -1;
+            gpioSelectedEffectId = -1;
+            gpioNavigationLayer = GpioNavigationLayer::Parameters;
+            if (gpioManager) gpioManager->ClearDisplayMessage();
+        }
         return;
     }
 
@@ -3969,6 +3998,10 @@ void PiPedalModel::HandleGpioInputEvent(const GpioInputEvent &event)
         }
     }
 
+    if (gpioManager && !event.initial &&
+        (event.delta != 0 || event.risingEdge || inputType == GpioInputType::Analog))
+        gpioManager->DismissBootLogo();
+
     if (inputType == GpioInputType::Navigation)
     {
         HandleGpioNavigationEvent(event);
@@ -4004,6 +4037,14 @@ void PiPedalModel::ExecuteGpioBinding(const GpioBinding &binding, const GpioInpu
         {
             return;
         }
+        std::lock_guard<std::recursive_mutex> lock(mutex);
+        const bool changesPreset = action == GpioActionType::LoadPreset ||
+            action == GpioActionType::NextPreset || action == GpioActionType::PreviousPreset ||
+            action == GpioActionType::NextBank || action == GpioActionType::PreviousBank;
+        // Ignore button bounce across preset loads, even if the new preset has
+        // another mapping for the same input. Start the cooldown after loading.
+        if (changesPreset && clock::now() < gpioPresetChangeAllowedAt)
+            return;
         switch (action)
         {
         case GpioActionType::LoadPreset:
@@ -4033,6 +4074,8 @@ void PiPedalModel::ExecuteGpioBinding(const GpioBinding &binding, const GpioInpu
         default:
             break;
         }
+        if (changesPreset)
+            gpioPresetChangeAllowedAt = clock::now() + std::chrono::milliseconds(100);
         return;
     }
 
@@ -4049,7 +4092,7 @@ void PiPedalModel::ExecuteGpioBinding(const GpioBinding &binding, const GpioInpu
             bool enabled = event.delta > 0;
             if (binding.maxValue_ < binding.minValue_) enabled = !enabled;
             SetPedalboardItemEnable(-1, binding.instanceId_, enabled);
-            ShowGpioBindingValue(binding, enabled ? 1.0f : 0.0f);
+            ShowGpioBindingValue(binding, event, enabled ? 1.0f : 0.0f);
             return;
         }
         PedalboardItem *item = nullptr;
@@ -4064,7 +4107,7 @@ void PiPedalModel::ExecuteGpioBinding(const GpioBinding &binding, const GpioInpu
             {
                 bool enabled = !item->isEnabled();
                 SetPedalboardItemEnable(-1, binding.instanceId_, enabled);
-                ShowGpioBindingValue(binding, enabled ? 1.0f : 0.0f);
+                ShowGpioBindingValue(binding, event, enabled ? 1.0f : 0.0f);
                 return;
             }
         }
@@ -4073,7 +4116,7 @@ void PiPedalModel::ExecuteGpioBinding(const GpioBinding &binding, const GpioInpu
         float midpoint = (binding.minValue_ + binding.maxValue_) * 0.5f;
         bool enabled = mapped >= midpoint;
         SetPedalboardItemEnable(-1, binding.instanceId_, enabled);
-        ShowGpioBindingValue(binding, enabled ? 1.0f : 0.0f);
+        ShowGpioBindingValue(binding, event, enabled ? 1.0f : 0.0f);
         return;
     }
 
@@ -4193,7 +4236,7 @@ void PiPedalModel::ExecuteGpioBinding(const GpioBinding &binding, const GpioInpu
         }
         SetControl(-1, binding.instanceId_, binding.symbol_, targetValue);
     }
-    ShowGpioBindingValue(binding, targetValue);
+    ShowGpioBindingValue(binding, event, targetValue);
 }
 
 // Overrides are supplied by advanced mappings, which carry their own range and
@@ -4361,9 +4404,12 @@ void PiPedalModel::UpdateGpioDashboard(int32_t activeSlot, bool temporary)
 
 void PiPedalModel::ShowGpioBindingValue(
     const GpioBinding &binding,
+    const GpioInputEvent &event,
     std::optional<float> suppliedValue)
 {
-    if (!gpioManager) return;
+    // Preset loads refresh direct mappings from the current input position.
+    // Apply those values silently; only actual input activity owns an overlay.
+    if (!gpioManager || event.initial) return;
     GpioDisplayMessage message;
     message.title = "PIPEDAL";
     message.label = binding.symbol_;

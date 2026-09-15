@@ -64,6 +64,7 @@ class PluginState {
 };
 
 const useWallpaper = false;
+const DEFAULT_COVER_ART = "/img/default_album.jpg";
 const WallPaper = styled('div')({
     position: 'absolute',
     width: '100%',
@@ -260,7 +261,6 @@ export default function ToobPlayerControl(
         model.jackConfiguration.get().sampleRate;
 
 
-    const defaultCoverArt = "/img/default_album.jpg";
     const [serverConnected, setServerConnected] = React.useState(model.state.get() == State.Ready);
     const [duration, setDuration] = React.useState(0.0);
     const [start, setStart] = React.useState(0.0);
@@ -268,7 +268,7 @@ export default function ToobPlayerControl(
     const [loopEnable, setLoopEnable] = React.useState(false);
     const [loopEnd, setLoopEnd] = React.useState(0.0);
     const [pluginState, setPluginState] = React.useState(0.0);
-    const [coverArt, setCoverArt] = React.useState(defaultCoverArt);
+    const [coverArt, setCoverArt] = React.useState(DEFAULT_COVER_ART);
     const [audioFile, setAudioFile] = React.useState("");
     const [position, setPosition] = React.useState(0.0);
     //let position = 0;
@@ -309,14 +309,14 @@ export default function ToobPlayerControl(
     function SelectFile() {
         setShowFileDialog(true);
     }
-    function onAudioFileChanged(path: string) {
+    const onAudioFileChanged = React.useCallback((path: string) => {
         setAudioFile(path);
         if (path === "") {
             setTitle("");
             setAlbum("");
             setArtist("");
             setAlbumArtist("");
-            setCoverArt(defaultCoverArt);
+            setCoverArt(DEFAULT_COVER_ART);
             return;
         }
         model.getAudioFileMetadata(path)
@@ -332,8 +332,7 @@ export default function ToobPlayerControl(
                 setTitle("#error" + e.message);
                 setAlbum("");
             });
-
-    }
+    }, [model]);
     function ControlCluster() {
         return (
             <Box
@@ -469,7 +468,7 @@ export default function ToobPlayerControl(
         throw "FileProperty not found.";
     }
 
-    function onLoopPropertyChanged(loopSettingsJson: string) {
+    const onLoopPropertyChanged = React.useCallback((loopSettingsJson: string) => {
         try {
             if (loopSettingsJson === "") {
                 setTimebase(
@@ -496,9 +495,7 @@ export default function ToobPlayerControl(
             let loopParameters: LoopParameters = atomObject.loopParameters as LoopParameters;
             let newTimebase: Timebase | undefined = atomObject.timebase as (Timebase | undefined);;
             if (newTimebase !== undefined) {
-                if (!timebaseEqual(timebase, newTimebase)) {
-                    setTimebase(newTimebase);
-                }
+                setTimebase((current) => timebaseEqual(current, newTimebase) ? current : newTimebase);
                 setLoopParameters(loopParameters);
                 setLoopEnable(loopParameters.loopEnable);
                 setStart(loopParameters.start);
@@ -520,8 +517,7 @@ export default function ToobPlayerControl(
             setLoopStart(0.0);
             setLoopEnd(0.0);
         }
-
-    }
+    }, []);
     function onNextTrack() {
         model.getNextAudioFile(audioFile)
             .then((file) => {
@@ -554,15 +550,15 @@ export default function ToobPlayerControl(
                 console.warn("Seek error. " + e.toString());
             });
     }
-    function onStateChanged(value: State) {
-        setServerConnected(value === State.Ready);
-    }
     useEffect(() => {
-        model.state.addOnChangedHandler(onStateChanged);
+        const handleStateChanged = (value: State) => {
+            setServerConnected(value === State.Ready);
+        };
+        model.state.addOnChangedHandler(handleStateChanged);
         if (model.state.get() !== State.Ready) {
             // wait for it.
             return () => {
-                model.state.removeOnChangedHandler(onStateChanged);
+                model.state.removeOnChangedHandler(handleStateChanged);
             }
         }
         let durationHandle = model.monitorPort(props.instanceId, "duration", 1.0 / 15,
@@ -617,7 +613,7 @@ export default function ToobPlayerControl(
 
 
         return () => {
-            model.state.removeOnChangedHandler(onStateChanged);
+            model.state.removeOnChangedHandler(handleStateChanged);
             model.unmonitorPort(durationHandle);
             model.unmonitorPort(pluginStateHandle);
             model.unmonitorPort(positionHandle);
@@ -629,7 +625,7 @@ export default function ToobPlayerControl(
             model.cancelMonitorPatchProperty(loopPropertyHandle);
         };
     },
-        [serverConnected]
+        [model, onAudioFileChanged, onLoopPropertyChanged, props.instanceId, serverConnected]
     );
     const titleLine = title !== "" ? title : pathFileNameOnly(audioFile);
     const albumLine = getAlbumLine(album, artist, albumArtist);

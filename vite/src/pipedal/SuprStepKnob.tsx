@@ -59,9 +59,8 @@ export interface SuprStepKnobProps {
     formatValue?: (value: number) => string;
 }
 
-// Vertical travel for one detent. Loose enough that a step is deliberate,
-// tight enough that the whole range is one comfortable drag.
-const PX_PER_STEP = 14;
+// Match SuprKnob's full-sweep travel, independent of the number of detents.
+const PX_PER_RANGE = 120;
 
 export default function SuprStepKnob(props: SuprStepKnobProps) {
     const {
@@ -112,7 +111,7 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
         if (!current || current.pointerId !== e.pointerId)
             return;
         const dy = current.y - e.clientY;   // up = more
-        current.value = snap(current.from + (dy / PX_PER_STEP) * step);
+        current.value = snap(current.from + (dy / PX_PER_RANGE) * (max - min));
         commit(current.value, false);
         e.preventDefault();
         e.stopPropagation();

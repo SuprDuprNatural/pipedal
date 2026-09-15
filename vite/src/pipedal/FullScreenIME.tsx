@@ -105,7 +105,6 @@ const FullScreenIME =
                     {
                         this.validateInput(true);
                     }
-                    // eslint-disable-next-line no-restricted-globals
                     if (document.documentElement.clientHeight >= this.props.initialHeight) {
                         this.validateInput(true);
                     }
@@ -239,4 +238,3 @@ const FullScreenIME =
     ));
 
 export default FullScreenIME;
-
