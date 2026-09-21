@@ -22,6 +22,7 @@ import SuprClackDisplay from './SuprClackDisplay';
 import SuprDotMeter from './SuprDotMeter';
 import SuprForgeDisplay from './SuprForgeDisplay';
 import SuprEchoActions from './SuprEchoActions';
+import SuprVowelDisplay from './SuprVowelDisplay';
 import { PanelColumn, SuprPanelUnit, mapControlNodes } from './SuprPanel';
 
 const SUPR_COMPRESSOR_URI = "https://suprduprnatural.github.io/supr-pedals/compressor";
@@ -794,5 +795,26 @@ export class SuprPhaseViewFactory implements IControlViewFactory {
     uri = "https://suprduprnatural.github.io/supr-pedals/phase";
     Create(model: PiPedalModel, item: PedalboardItem): React.ReactNode {
         return <SuprPhaseView instanceId={item.instanceId} item={item} />;
+    }
+}
+
+
+const SuprVowelView = makePanelView((ctx) => ({
+    header: <SuprVowelDisplay key="vowel_display" instanceId={ctx.instanceId}
+        from={ctx.controlValues.vowel_a ?? 0} to={ctx.controlValues.vowel_b ?? 2} />,
+    columns: [
+        { sections: [{ label: "Voice", rows: [["vowel_a"], ["vowel_b"],
+            [{ supr: "throat", marks: "home" }], ["focus"]] }] },
+        { sections: [{ label: "Motion", rows: [["mode"], ["position"], ["depth"], ["rate"]] }] },
+        { sections: [
+            { label: "Envelope", rows: [["sensitivity"], ["release"]] },
+            { label: "Output", rows: [["mix"], [{ supr: "level", marks: "home" }]] }
+        ] }
+    ]
+}));
+export class SuprVowelViewFactory implements IControlViewFactory {
+    uri = "https://suprduprnatural.github.io/supr-pedals/vowel";
+    Create(model: PiPedalModel, item: PedalboardItem): React.ReactNode {
+        return <SuprVowelView instanceId={item.instanceId} item={item} />;
     }
 }
