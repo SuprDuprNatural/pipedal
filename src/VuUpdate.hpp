@@ -35,6 +35,7 @@ namespace pipedal
         float inputMaxValueR_ = 0;
         float outputMaxValueL_ = 0;
         float outputMaxValueR_ = 0;
+        float outputLufs_ = -120; // main output only; finite silence sentinel
 
     public:
         void reset() {

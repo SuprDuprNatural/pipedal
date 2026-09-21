@@ -32,5 +32,6 @@ JSON_MAP_BEGIN(VuUpdateX)
     JSON_MAP_REFERENCE(VuUpdateX,inputMaxValueR)
     JSON_MAP_REFERENCE(VuUpdateX,outputMaxValueL)
     JSON_MAP_REFERENCE(VuUpdateX,outputMaxValueR)
+    JSON_MAP_REFERENCE(VuUpdateX,outputLufs)
 JSON_MAP_END()
 

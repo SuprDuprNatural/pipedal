@@ -50,6 +50,7 @@ import ResizeResponsiveComponent from './ResizeResponsiveComponent';
 import Button from '@mui/material/Button';
 import PresetSelector from './PresetSelector';
 import AirplayControl from './AirplayControl';
+import OutputMeter from './OutputMeter';
 import SettingsDialog from './SettingsDialog';
 import AboutDialog from './AboutDialog';
 import BankDialog from './BankDialog';
@@ -826,6 +827,7 @@ export
                                             <PresetSelector />
                                         </div>
                                         <div style={{ flex: "2 2 30px" }} />
+                                        <OutputMeter />
                                         <AirplayControl />
                                         {this.state.canFullScreen &&
                                             <IconButtonEx

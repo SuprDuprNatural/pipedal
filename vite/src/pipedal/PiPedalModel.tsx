@@ -269,6 +269,7 @@ export interface VuUpdateInfo {
     inputMaxValueR: number;
     outputMaxValueL: number;
     outputMaxValueR: number;
+    outputLufs?: number; // absent on hosts predating short-term output loudness
 };
 
 export interface MonitorPortHandle {

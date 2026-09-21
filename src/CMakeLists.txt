@@ -958,3 +958,8 @@ add_test(NAME LatencyCompensation COMMAND latencyCompensationTest)
 
 # Latency ports can contain NaN/Inf; do not optimize away validation.
 set_property(SOURCE Lv2Effect.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math -ffp-contract=off)
+
+add_executable(outputLoudnessTest OutputLoudnessTest.cpp)
+target_compile_features(outputLoudnessTest PRIVATE cxx_std_17)
+target_compile_options(outputLoudnessTest PRIVATE -UNDEBUG)
+add_test(NAME OutputLoudness COMMAND outputLoudnessTest)

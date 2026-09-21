@@ -50,6 +50,7 @@ using namespace pipedal;
 #include <thread>
 #include <semaphore.h>
 #include "VuUpdate.hpp"
+#include "OutputLoudness.hpp"
 #include "CpuGovernor.hpp"
 
 #include "RingBuffer.hpp"
@@ -556,6 +557,7 @@ private:
     std::vector<std::shared_ptr<Lv2Pedalboard>> activePedalboards; // pedalboards that have been sent to the audio queue.
     Lv2Pedalboard *realtimeActivePedalboard = nullptr;
 
+    OutputLoudness outputLoudness_; // realtime state, survives pedalboard/subscription replacement
     uint32_t sampleRate = 0;
     uint64_t currentSample = 0;
 
@@ -1343,6 +1345,18 @@ private:
             AccumulateVu(&vuUpdate.outputMaxValueR_, nFrames, this->audioDriver->DeviceOutputBuffers()[channels[1]]);
         }
     }
+    void ComputeOutputLoudness(size_t nFrames)
+    {
+        const auto &channels = channelSelection.mainOutputChannels();
+        const auto &buffers = audioDriver->DeviceOutputBuffers();
+        auto buffer = [&](size_t index) -> const float* {
+            if (index >= channels.size() || channels[index] < 0 ||
+                static_cast<size_t>(channels[index]) >= buffers.size()) return nullptr;
+            return buffers[channels[index]];
+        };
+        outputLoudness_.Process(buffer(0), buffer(1), nFrames);
+    }
+
     void ComputeMasterVus(size_t nFrames)
     {
         if (this->realtimeVuBuffers)
@@ -1360,6 +1374,7 @@ private:
                         break;
                     case Pedalboard::END_CONTROL_ID:
                         AccumulateVuOutputs(nFrames, vuUpdate, pHost->GetChannelSelection().mainOutputChannels());
+                        vuUpdate.outputLufs_ = outputLoudness_.ShortTermLufs();
                         break;
                     case Pedalboard::AUX_START_CONTROL_ID:
                         AccumulateVuInputs(nFrames, vuUpdate, pHost->GetChannelSelection().auxInputChannels());
@@ -1510,6 +1525,7 @@ private:
         {
             realtimeActivePedalboard->ComputeVus(this->realtimeVuBuffers, nFrames);
         }
+        ComputeOutputLoudness(nFrames);
         ComputeMasterVus(nFrames);
         CaptureGpioTunerInput(nFrames);
         CaptureWaveform(nFrames, false);
@@ -2097,6 +2113,7 @@ public:
             audioDriver->Open(jackServerSettings, this->channelSelection);
             audioDriver->SetAlsaSequencer(this->alsaSequencer);
             this->sampleRate = audioDriver->GetSampleRate();
+            outputLoudness_.Prepare(this->sampleRate);
             gpioTunerWriteIndex_.store(0, std::memory_order_release);
             gpioTunerSampleRate_.store(this->sampleRate, std::memory_order_release);
 
