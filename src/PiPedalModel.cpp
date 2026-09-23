@@ -133,6 +133,7 @@ void PiPedalModel::Close()
 {
     std::unique_ptr<AudioHost> oldAudioHost;
     std::unique_ptr<GpioManager> oldGpioManager;
+    std::unique_ptr<BuiltInTuner> oldTuner;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
 
@@ -147,6 +148,7 @@ void PiPedalModel::Close()
         closed = true;
 
         oldGpioManager = std::move(gpioManager);
+        oldTuner = std::move(builtInTuner);
 
         CancelAudioRetry();
 
@@ -170,6 +172,7 @@ void PiPedalModel::Close()
     {
         oldGpioManager->Close();
     }
+    oldTuner.reset(); // stop the reader before closing its audio source.
 
     // lockless to avoid deadlocks while shutting down the audio thread.
     if (oldAudioHost)
@@ -467,6 +470,12 @@ void PiPedalModel::Load()
 
     std::unique_ptr<AudioHost> p{AudioHost::CreateInstance(pluginHost.asIHost())};
     this->audioHost = std::move(p);
+    AudioHost *tunerHost = audioHost.get();
+    builtInTuner = std::make_unique<BuiltInTuner>(
+        [tunerHost](uint64_t *index, float *samples, size_t capacity, uint32_t *rate)
+        {
+            return tunerHost->ReadGpioTunerInput(index, samples, capacity, rate);
+        });
 
     this->audioHost->SetNotificationCallbacks(this);
 
@@ -3183,6 +3192,12 @@ GpioSettings PiPedalModel::GetGpioSettings()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     return gpioSettings;
+}
+
+GpioTunerFrame PiPedalModel::GetTunerFrame()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    return builtInTuner ? builtInTuner->GetFrame() : GpioTunerFrame{};
 }
 
 void PiPedalModel::SetGpioSettings(const GpioSettings &settings)

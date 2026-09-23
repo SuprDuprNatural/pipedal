@@ -27,13 +27,13 @@ const BARS = [
 function Digits({ value }: { value?: number }) {
     const text = value === undefined ? ' --.-' : value.toFixed(1).padStart(5, ' ');
     let x = 0;
-    return <g fill="#e8a36e">{Array.from(text).map((character, index) => {
+    return <g fill="#f39a45">{Array.from(text).map((character, index) => {
         const at = x; x += character === '.' ? 5 : 16;
         return <g key={index} transform={`translate(${at} 0)`}>
             {character === '.' ? <rect x="0" y="20.5" width="1.8" height="1.8" rx=".3" /> :
                 BARS.map(([bx, by, width, height], segment) =>
                     <rect key={segment} x={bx} y={by} width={width} height={height} rx=".4"
-                        opacity={character === ' ' ? 0 : SEGMENTS[character]?.includes('abcdefg'[segment]) ? 1 : .065} />)}
+                        opacity={character === ' ' ? 0 : SEGMENTS[character]?.includes('abcdefg'[segment]) ? 1 : .075} />)}
         </g>;
     })}</g>;
 }
@@ -102,29 +102,36 @@ export default function OutputMeter() {
         `${peakText} dBFS sample peak${reading.clip ? ', clipping' : ''}`;
     return <div className="supr-output-meter" role="img" aria-label={description}
         title="Output · 3-second LUFS · sample peak dBFS">
-        <svg viewBox="0 0 310 36" width="310" height="36" aria-hidden="true">
-            <g transform="translate(8 6)"><Digits value={reading.lufs} /></g>
+        <svg viewBox="0 0 312 36" width="312" height="36" aria-hidden="true">
+            <defs>
+                <filter id="toolbarOutputGlow" x="-30%" y="-80%" width="160%" height="260%">
+                    <feGaussianBlur in="SourceGraphic" stdDeviation=".7" result="blur" />
+                    <feComponentTransfer in="blur" result="halo"><feFuncA type="linear" slope=".55" /></feComponentTransfer>
+                    <feMerge><feMergeNode in="halo" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+            </defs>
+            <g filter="url(#toolbarOutputGlow)" transform="translate(8 6)"><Digits value={reading.lufs} /></g>
             <text x="80" y="24" className="supr-output-unit">LUFS</text>
             <path d="M110 7V29" stroke="white" strokeOpacity=".1" />
             {(reading.stereo ? [0, 1] : [0]).map(channel => {
                 const y = reading.stereo ? 9 + channel * 7 : 12;
-                return <g key={channel}>
+                return <g key={channel} filter="url(#toolbarOutputGlow)">
                     {Array.from({ length: 48 }, (_, i) => <rect key={i}
                         x={120 + i * 3} y={y} width="2" height="4" rx=".4"
-                        fill={i >= 45 ? '#e77867' : i >= 36 ? '#e8a36e' : '#8ba9a0'}
-                        opacity={position(reading.peaks[channel]) * 48 > i ? 1 : .14} />)}
+                        fill={i >= 45 ? '#e50f2a' : i >= 36 ? '#f5ad44' : '#19dc35'}
+                        opacity={position(reading.peaks[channel]) * 48 > i ? 1 : .10} />)}
                     {reading.holds[channel] > FLOOR && <rect
                         x={120 + Math.min(47, Math.floor(position(reading.holds[channel]) * 48)) * 3}
-                        y={y - 1} width="2" height="6" rx=".4" fill="#f0d3b9" />}
+                        y={y - 1} width="2" height="6" rx=".4" fill="#f4fbd7" />}
                 </g>;
             })}
             {[-48, -24, -12, 0].map(tick => <text key={tick}
                 x={120 + position(tick) * 143} y="31" textAnchor={tick === -48 ? 'start' : tick === 0 ? 'end' : 'middle'}
                 className="supr-output-scale">{tick === 0 ? '0' : '−' + -tick}</text>)}
-            <text x="302" y="17" textAnchor="end" className="supr-output-peak"
+            <text x="296" y="17" textAnchor="end" className="supr-output-peak"
                 fill={reading.clip ? '#ff8978' : '#e6d9cc'}>{peakText}</text>
-            <text x="302" y="30" textAnchor="end" className="supr-output-unit">dBFS</text>
-            <rect x="308" y="7" width="2" height="22" rx="1" fill="#ff7864" opacity={reading.clip ? 1 : 0} />
+            <text x="296" y="30" textAnchor="end" className="supr-output-unit">dBFS</text>
+            <rect x="303" y="7" width="2" height="22" rx="1" fill="#e50f2a" opacity={reading.clip ? 1 : 0} />
         </svg>
     </div>;
 }

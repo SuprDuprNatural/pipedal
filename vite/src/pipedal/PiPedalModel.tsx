@@ -272,6 +272,14 @@ export interface VuUpdateInfo {
     outputLufs?: number; // absent on hosts predating short-term output loudness
 };
 
+export interface TunerFrame {
+    frequency: number;
+    note: number;
+    cents: number;
+    confidence: number;
+    strobePhase: number;
+}
+
 export interface MonitorPortHandle {
 };
 export interface ControlValueChangedHandle {
@@ -2127,6 +2135,9 @@ export class PiPedalModel //implements PiPedalModel
     }
     previewAirplayVolume(volume: number): void {
         this.webSocket?.send("previewAirplayVolume", volume);
+    }
+    getTunerFrame(): Promise<TunerFrame> {
+        return this.getWebSocket().request<TunerFrame>("getTunerFrame");
     }
     setAirplayOutputChannel(outputChannel: number): void {
         let settings = this.airplaySettings.get().clone();

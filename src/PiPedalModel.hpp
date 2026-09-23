@@ -27,6 +27,7 @@
 #include "Banks.hpp"
 #include "JackConfiguration.hpp"
 #include "AudioHost.hpp"
+#include "BuiltInTuner.hpp"
 #include "VuUpdate.hpp"
 #include <functional>
 #include <filesystem>
@@ -270,6 +271,7 @@ namespace pipedal
         }
 
         std::unique_ptr<AudioHost> audioHost;
+        std::unique_ptr<BuiltInTuner> builtInTuner;
         JackConfiguration jackConfiguration;
         std::shared_ptr<Lv2Pedalboard> lv2Pedalboard;
         std::filesystem::path webRoot;
@@ -529,6 +531,7 @@ namespace pipedal
         std::vector<MidiBinding> GetSystemMidiBidings();
 
         GpioSettings GetGpioSettings();
+        GpioTunerFrame GetTunerFrame();
         void SetGpioSettings(const GpioSettings &settings);
         GpioCapabilities GetGpioCapabilities();
         std::vector<GpioInputStatus> GetGpioInputStatuses();

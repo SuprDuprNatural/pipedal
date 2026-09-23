@@ -51,6 +51,27 @@
 using namespace std;
 using namespace pipedal;
 
+class TunerFrameReply
+{
+public:
+    explicit TunerFrameReply(const GpioTunerFrame &frame)
+        : frequency_(frame.frequency), note_(frame.note), cents_(frame.cents),
+          confidence_(frame.confidence), strobePhase_(frame.strobePhase) {}
+    float frequency_;
+    int32_t note_;
+    float cents_;
+    float confidence_;
+    float strobePhase_;
+    DECLARE_JSON_MAP(TunerFrameReply);
+};
+JSON_MAP_BEGIN(TunerFrameReply)
+JSON_MAP_REFERENCE(TunerFrameReply, frequency)
+JSON_MAP_REFERENCE(TunerFrameReply, note)
+JSON_MAP_REFERENCE(TunerFrameReply, cents)
+JSON_MAP_REFERENCE(TunerFrameReply, confidence)
+JSON_MAP_REFERENCE(TunerFrameReply, strobePhase)
+JSON_MAP_END();
+
 class CopyPresetsToBankBody
 {
 public:
@@ -1606,6 +1627,12 @@ public:
         Reply(replyTo, "getAirplaySettings", this->model.GetAirplaySettings());
     }
     REGISTER_MESSAGE_HANDLER(getAirplaySettings)
+
+    void handle_getTunerFrame(int replyTo, json_reader *pReader)
+    {
+        Reply(replyTo, "getTunerFrame", TunerFrameReply(model.GetTunerFrame()));
+    }
+    REGISTER_MESSAGE_HANDLER(getTunerFrame)
 
     void handle_setAirplaySettings(int replyTo, json_reader *pReader)
     {
