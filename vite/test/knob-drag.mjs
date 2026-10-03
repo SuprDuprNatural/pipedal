@@ -6,6 +6,21 @@ import ts from 'typescript';
 
 function knob(file, props) {
     const events = [];
+    const effects = [];
+    const document = {activeElement: null};
+    const listeners = new Map();
+    const element = {
+        focus() { document.activeElement = element; },
+        setPointerCapture() {},
+        addEventListener(name, handler, options) {
+            assert.equal(options.passive, false, 'Wheel must be cancellable');
+            listeners.set(name, handler);
+        },
+        removeEventListener(name, handler) {
+            assert.equal(listeners.get(name), handler);
+            listeners.delete(name);
+        },
+    };
     const model = {
         previewPedalboardValue: (...args) => events.push(['preview', ...args]),
         setPedalboardControl: (...args) => events.push(['commit', ...args]),
@@ -14,6 +29,7 @@ function knob(file, props) {
         useRef: current => ({current}),
         useState: value => [value, () => {}],
         useCallback: callback => callback,
+        useEffect: effect => effects.push(effect),
     };
     const jsx = (type, props) => ({type, props});
     const imports = {
@@ -28,10 +44,10 @@ function knob(file, props) {
         jsx: ts.JsxEmit.ReactJSX,
     }}).outputText;
     const exports = {};
-    new Function('exports', 'require', js)(exports, name => {
+    new Function('exports', 'require', 'document', js)(exports, name => {
         assert(name in imports, 'Unexpected dependency: '+name);
         return imports[name];
-    });
+    }, document);
     function slider(node) {
         if (!node || typeof node !== 'object') return;
         if (node.props?.role === 'slider') return node.props;
@@ -40,10 +56,14 @@ function knob(file, props) {
             if (found) return found;
         }
     }
-    return {handlers: slider(exports.default(props)), events};
+    const handlers = slider(exports.default(props));
+    handlers.ref.current = element;
+    const cleanups = effects.map(effect => effect());
+    return {handlers, events, element, document, listeners,
+        cleanup: () => cleanups.forEach(cleanup => cleanup?.())};
 }
 const event = (clientY, extra = {}) => ({pointerId: 1, pointerType: 'mouse', button: 0,
-    clientY, currentTarget: {setPointerCapture() {}}, preventDefault() {}, stopPropagation() {}, ...extra});
+    clientY, currentTarget: {focus() {}, setPointerCapture() {}}, preventDefault() {}, stopPropagation() {}, ...extra});
 function drag(file, props, distance) {
     const {handlers, events} = knob(file, props);
     handlers.onPointerDown(event(200));
@@ -67,9 +87,37 @@ for (const [min,max,step] of [[-24,24,1],[-12,12,3],[0,100,1],[0,4,1]]) {
     }
     assert.equal(drag('SuprStepKnob.tsx', {...props,value:max}, -120), min);
     const {handlers, events} = knob('SuprStepKnob.tsx', props);
-    handlers.onWheel(event(0,{deltaY:-1}));
-    assert.equal(events.at(-1).at(-1), min+step);
     handlers.onKeyDown(event(0,{key:'ArrowUp'}));
     assert.equal(events.at(-1).at(-1), min+step);
+
+    for (const [file, controlProps, increment] of [
+        ['SuprKnob.tsx', continuous, (max-min)*0.01],
+        ['SuprStepKnob.tsx', props, step],
+    ]) {
+        const {handlers, events, element, document, listeners, cleanup} = knob(file, controlProps);
+        let consumed = 0;
+        const wheel = {deltaY: -1, preventDefault() { ++consumed; },
+            stopPropagation() { ++consumed; }};
+        listeners.get('wheel')(wheel);
+        assert.equal(events.length, 0, 'Hover-scrolling must not adjust a knob');
+        assert.equal(consumed, 0, 'Unfocused wheel must keep scrolling the rack');
+        handlers.onPointerDown(event(200, {currentTarget: element}));
+        assert.equal(document.activeElement, element, 'Clicking focuses the knob');
+        handlers.onPointerUp(event(200, {currentTarget: element}));
+        events.length = 0;
+        listeners.get('wheel')({...wheel, deltaY: 0});
+        assert.equal(events.length, 0, 'Horizontal scrolling must not change a value');
+        assert.equal(consumed, 0);
+        listeners.get('wheel')(wheel);
+        assert(Math.abs(events.at(-1).at(-1)-(min+increment)) < 1e-9);
+        assert.equal(consumed, 2, 'Focused wheel must prevent scrolling and bubbling');
+        document.activeElement = null;
+        events.length = 0;
+        listeners.get('wheel')(wheel);
+        assert.equal(events.length, 0, 'Losing focus restores ordinary scrolling');
+        assert.equal(consumed, 2);
+        cleanup();
+        assert.equal(listeners.size, 0, 'Unmount must remove the native listener');
+    }
 }
-console.log('Stepped and continuous knobs share a 120px sweep; snapping, small moves, bounds, wheel and keyboard steps passed.');
+console.log('Knob sweep, snapping, bounds, keyboard and focus-only cancellable wheel adjustment passed.');

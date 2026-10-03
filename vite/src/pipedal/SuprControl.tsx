@@ -19,6 +19,7 @@ export interface SuprControlProps {
     fallback?: ReactNode;
     marks?: SuprKnobMarks;
     markCount?: number;
+    centerValue?: number;
     step?: number;
     showReadout?: boolean;
     showPointer?: boolean;
@@ -75,7 +76,8 @@ export default function SuprControl(props: SuprControlProps) {
                     uiControl={uiControl}
                     value={props.value ?? uiControl.default_value}
                     marks={props.marks}
-                    markCount={props.markCount} />
+                    markCount={props.markCount}
+                    centerValue={props.centerValue} />
             );
         case ControlType.OnOffSwitch:
         case ControlType.ABSwitch:

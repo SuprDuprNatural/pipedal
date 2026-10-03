@@ -18,6 +18,8 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import { SyntheticEvent } from 'react';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import IconButtonEx from './IconButtonEx';
 import { PiPedalModel, PiPedalModelFactory, PresetIndex } from './PiPedalModel';
@@ -348,7 +350,7 @@ const PresetSelector =
                         justifyContent: "left", flexWrap: "nowrap", alignItems: "center", height: "100%", position: "relative"
                     }}>
                         <div style={{ flex: "0 0 auto" }}>
-                            <IconButtonEx tooltip="Save current preset"
+                            <IconButtonEx tooltip="Save current preset (Ctrl/⌘ S)"
                                 style={{ flex: "0 0 auto", color: "#FFFFFF" }}
                                 onClick={(e) => { this.handleSave(); }}
                                 size="large">
@@ -427,6 +429,27 @@ const PresetSelector =
                                 <MenuItem onClick={(e) => this.handleMenuEditPresets()}>Manage presets...</MenuItem>
                             </Menu>
                         </div>
+
+                        <IconButtonEx
+                            tooltip="Previous preset"
+                            aria-label="Previous preset"
+                            style={{ flex: "0 0 auto", color: "#FFFFFF" }}
+                            disabled={!this.state.enabled || presets.presets.length < 2}
+                            onClick={() => this.model.previousPreset()}
+                            size="large"
+                        >
+                            <ArrowBackIcon style={{ opacity: 0.75 }} color="inherit" />
+                        </IconButtonEx>
+                        <IconButtonEx
+                            tooltip="Next preset"
+                            aria-label="Next preset"
+                            style={{ flex: "0 0 auto", color: "#FFFFFF" }}
+                            disabled={!this.state.enabled || presets.presets.length < 2}
+                            onClick={() => this.model.nextPreset()}
+                            size="large"
+                        >
+                            <ArrowForwardIcon style={{ opacity: 0.75 }} color="inherit" />
+                        </IconButtonEx>
 
                         {/* Submenu */}
                         <Menu key="b" onClose={() => this.handlePresetsSubmenuClose()}  

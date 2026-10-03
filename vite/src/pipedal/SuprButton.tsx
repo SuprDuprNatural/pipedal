@@ -135,7 +135,7 @@ export default function SuprButton(props: SuprButtonProps) {
                 )}
             </div>
             <div style={{
-                height: 22, display: "flex", alignItems: "flex-start",
+                height: compact && hideLabel ? 0 : 22, display: "flex", alignItems: "flex-start",
                 fontSize: 11, color: text, visibility: "hidden"
             }}>
                 {reading}

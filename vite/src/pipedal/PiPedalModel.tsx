@@ -69,6 +69,24 @@ export enum State {
     HotspotChanging,
 };
 
+export interface EffectPresetHistoryState {
+    canUndo: boolean;
+    canRedo: boolean;
+    busy: boolean;
+    label: string;
+}
+
+interface EffectPresetUndoEntry {
+    before: PedalboardItem;
+    after: PedalboardItem;
+    context: string;
+    bankId: number;
+    presetId: number;
+    label: string;
+    undone: boolean;
+    fingerprint: string;
+}
+
 export interface T3kModelSelectionDialogListener {
     onShowDialog: (
         modelSelectionDialogParams: ModelSelectionDialogParams
@@ -656,6 +674,8 @@ export class PiPedalModel //implements PiPedalModel
         this.onSocketReconnected = this.onSocketReconnected.bind(this);
         this.onVisibilityChanged = this.onVisibilityChanged.bind(this);
         this.onSocketConnectionLost = this.onSocketConnectionLost.bind(this);
+        this.presets.addOnChangedHandler(() => this.validateEffectPresetHistory());
+        this.banks.addOnChangedHandler(() => this.validateEffectPresetHistory());
     }
 
 
@@ -844,6 +864,7 @@ export class PiPedalModel //implements PiPedalModel
         this.pedalboard.set(pedalboard);
         this.selectedSnapshot.set(pedalboard.selectedSnapshot);
         this.updateEnabledItems(pedalboard);
+        this.validateEffectPresetHistory();
     }
     onSocketMessage(header: PiPedalMessageHeader, body?: any) {
 
@@ -1228,6 +1249,7 @@ export class PiPedalModel //implements PiPedalModel
     private setState(state: State) {
         if (this.state.get() !== state) {
             this.state.set(state);
+            if (state !== State.Ready) this.clearEffectPresetHistory();
             if (state === State.Error) {
                 this.closeTone3000DownloadPopup();
             }
@@ -1815,6 +1837,7 @@ export class PiPedalModel //implements PiPedalModel
     private onLv2StateChanged(instanceId: number, state: [boolean, any]): void {
         let item = this.pedalboard.get().getItem(instanceId);
         item.lv2State = state;
+        this.validateEffectPresetHistory();
         for (let item of this.stateChangedListeners) {
             if (item.instanceId === instanceId) {
                 item.onStateChanged(instanceId);
@@ -1989,6 +2012,7 @@ export class PiPedalModel //implements PiPedalModel
         let item = newPedalboard.getItem(instanceId);
         changed = item.setControlValue(key, value);
         if (changed) {
+            this.invalidateEffectPresetEdit(instanceId);
             if (notifyServer) {
                 this.lastControlMessageWasSentbyMe = true;
                 this._setServerControl("setControl", instanceId, key, value);
@@ -2012,6 +2036,7 @@ export class PiPedalModel //implements PiPedalModel
         item.vstState = state;
 
         if (changed) {
+            this.invalidateEffectPresetEdit(instanceId);
             this.setModelPedalboard(newPedalboard);
             if (notifyServer) {
                 this._setServerControl("setControl", instanceId, key, value);
@@ -2792,6 +2817,7 @@ export class PiPedalModel //implements PiPedalModel
         }
     }
     setPatchProperty(instanceId: number, uri: string, value: any): Promise<boolean> {
+        this.invalidateEffectPresetEdit(instanceId);
         let result = new Promise<boolean>((resolve, reject) => {
             if (this.webSocket) {
                 this.webSocket.request<boolean>(
@@ -2926,8 +2952,126 @@ export class PiPedalModel //implements PiPedalModel
         });
     }
 
+    effectPresetHistory = new ObservableProperty<EffectPresetHistoryState>({
+        canUndo: false, canRedo: false, busy: false, label: ""
+    });
+    private effectPresetUndo?: EffectPresetUndoEntry;
+    private effectPresetEpoch = 0;
+    private effectPresetOperation?: { context: string; instanceId: number; epoch: number };
+
+    private effectPresetContext(): string {
+        const board = this.pedalboard.get();
+        return JSON.stringify([this.banks.get().selectedBank, this.presets.get().selectedInstanceId,
+            board.selectedSnapshot, Array.from(board.itemsGenerator(), item =>
+                [item.instanceId, item.uri, item.sideChainInputId])]);
+    }
+
+    private effectSoundFingerprint(instanceId: number): string {
+        const item = this.pedalboard.get().tryGetItem(instanceId);
+        return item ? JSON.stringify([item.uri, item.controlValues, item.lv2State,
+            item.vstState, item.pathProperties, item.lilvPresetUri]) : "";
+    }
+
+    private publishEffectPresetHistory() {
+        const entry = this.effectPresetUndo;
+        this.effectPresetHistory.set({ canUndo: !!entry && !entry.undone,
+            canRedo: !!entry && entry.undone, busy: !!this.effectPresetOperation, label: entry?.label ?? "" });
+    }
+
+    private clearEffectPresetHistory() {
+        ++this.effectPresetEpoch;
+        this.effectPresetUndo = undefined;
+        this.publishEffectPresetHistory();
+    }
+
+    private invalidateEffectPresetEdit(instanceId: number) {
+        if (this.effectPresetUndo?.before.instanceId === instanceId
+            || this.effectPresetOperation?.instanceId === instanceId) this.clearEffectPresetHistory();
+    }
+
+    private validateEffectPresetHistory() {
+        const context = this.effectPresetContext();
+        const entry = this.effectPresetUndo;
+        if ((this.effectPresetOperation && this.effectPresetOperation.context !== context)
+            || (entry && (entry.context !== context || (!this.effectPresetOperation
+                && entry.fingerprint !== this.effectSoundFingerprint(entry.before.instanceId))))) {
+            this.clearEffectPresetHistory();
+        }
+    }
+
     loadPluginPreset(pluginInstanceId: number, presetInstanceId: number): void {
-        this.webSocket?.send("loadPluginPreset", { pluginInstanceId: pluginInstanceId, presetInstanceId: presetInstanceId });
+        void this.loadEffectPresetWithUndo(pluginInstanceId, presetInstanceId);
+    }
+
+    private async loadEffectPresetWithUndo(instanceId: number, pluginPresetId: number): Promise<void> {
+        if (this.effectPresetOperation || this.state.get() !== State.Ready || !this.webSocket) return;
+        const item = this.pedalboard.get().tryGetItem(instanceId);
+        if (!item) return;
+        this.clearEffectPresetHistory();
+        const operation = { context: this.effectPresetContext(), instanceId, epoch: this.effectPresetEpoch };
+        const bankId = this.banks.get().selectedBank;
+        const presetId = this.presets.get().selectedInstanceId;
+        const effectName = item.title || this.getUiPlugin(item.uri)?.name || "Effect";
+        const presetName = this.presetCache[item.uri]?.getItem(pluginPresetId)?.label;
+        const label = presetName ? `${effectName} · ${presetName}` : effectName;
+        this.effectPresetOperation = operation;
+        this.publishEffectPresetHistory();
+        try {
+            const result = await this.webSocket.request<PedalboardItem[]>("loadPluginPresetWithUndo",
+                { bankId, presetId, instanceId, uri: item.uri, pluginPresetId });
+            if (operation.epoch !== this.effectPresetEpoch || operation.context !== this.effectPresetContext()
+                || this.state.get() !== State.Ready) return;
+            this.effectPresetUndo = {
+                before: new PedalboardItem().deserialize(result[0]),
+                after: new PedalboardItem().deserialize(result[1]),
+                bankId, presetId, context: operation.context, label, undone: false,
+                fingerprint: this.effectSoundFingerprint(instanceId)
+            };
+        } catch (error) {
+            this.clearEffectPresetHistory();
+            this.showAlert("Could not load effect preset: " + String(error));
+        } finally {
+            if (this.effectPresetOperation === operation) this.effectPresetOperation = undefined;
+            this.publishEffectPresetHistory();
+        }
+    }
+
+    async undoEffectPreset(): Promise<void> {
+        await this.restoreEffectPreset(false);
+    }
+
+    async redoEffectPreset(): Promise<void> {
+        await this.restoreEffectPreset(true);
+    }
+
+    private async restoreEffectPreset(redo: boolean): Promise<void> {
+        this.validateEffectPresetHistory();
+        const entry = this.effectPresetUndo;
+        if (!entry || entry.undone !== redo || this.effectPresetOperation
+            || this.state.get() !== State.Ready || !this.webSocket) return;
+        const operation = { context: entry.context, instanceId: entry.before.instanceId,
+            epoch: this.effectPresetEpoch };
+        this.effectPresetOperation = operation;
+        this.publishEffectPresetHistory();
+        try {
+            const result = await this.webSocket.request<PedalboardItem>("restorePluginPresetState", {
+                bankId: entry.bankId, presetId: entry.presetId,
+                expected: redo ? entry.before : entry.after, target: redo ? entry.after : entry.before
+            });
+            if (operation.epoch !== this.effectPresetEpoch || operation.context !== this.effectPresetContext()
+                || this.state.get() !== State.Ready) return;
+            // Use the actual restored state for the next comparison, including any plugin normalization.
+            const applied = new PedalboardItem().deserialize(result);
+            if (redo) entry.after = applied; else entry.before = applied;
+            entry.undone = !redo;
+            entry.fingerprint = this.effectSoundFingerprint(entry.before.instanceId);
+        } catch (error) {
+            this.clearEffectPresetHistory();
+            this.showAlert("Could not " + (redo ? "redo" : "undo") + " effect preset: " + String(error));
+        } finally {
+            if (this.effectPresetOperation === operation) this.effectPresetOperation = undefined;
+            this.publishEffectPresetHistory();
+        }
     }
 
     handlePluginPresetsChanged(pluginUri: string): void {
@@ -3085,6 +3229,7 @@ export class PiPedalModel //implements PiPedalModel
         let pedalboardItem = pedalboard.getItem(instanceId);
         if (pedalboardItem) {
             pedalboardItem.pathProperties[propertyUri] = jsonObjectString;
+            this.validateEffectPresetHistory();
         }
         // No NOT notify monitorPatchProperty listeners, because they extpect objects not strings, 
         // AND they will a NotifyPatchPropertychanged message anyway.
@@ -3097,6 +3242,7 @@ export class PiPedalModel //implements PiPedalModel
 
             if (pedalboardItem && pedalboardItem.pathProperties[propertyUri] !== undefined) {
                 pedalboardItem.pathProperties[propertyUri] = JSON.stringify(jsonObject);
+                this.validateEffectPresetHistory();
             }
         } catch (ignored) {
             // e.g. notification for a pedalboard item that is no longer valid.

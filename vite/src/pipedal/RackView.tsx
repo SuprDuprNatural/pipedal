@@ -22,6 +22,9 @@ import React, { useRef, useState } from 'react';
 import { Theme } from '@mui/material/styles';
 import Switch from '@mui/material/Switch';
 import Typography from '@mui/material/Typography';
+import IconButton from '@mui/material/IconButton';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 
 import { Pedalboard, PedalboardItem } from './Pedalboard';
 import { PiPedalModelFactory } from './PiPedalModel';
@@ -29,6 +32,7 @@ import { GetControlView } from './ControlViewFactory';
 import { FitContentContext } from './PluginControlView';
 import Draggable from './Draggable';
 import { isDarkMode } from './DarkMode';
+import PluginPresetSelector from './PluginPresetSelector';
 
 const COLLAPSED_RACK_ITEM_WIDTH = 52;
 const RACK_ITEM_HEADER_HEIGHT = 40;
@@ -230,7 +234,7 @@ function RackView(props: RackViewProps) {
                     height: "100%",
                     minWidth: 0,
                     paddingLeft: collapsed ? 0 : 8,
-                    paddingRight: collapsed ? 0 : 16,
+                    paddingRight: collapsed ? 0 : 4,
                     paddingBottom: collapsed ? 8 : 0,
                     cursor: dragging ? "grabbing" : (draggable ? "grab" : "pointer"),
                     userSelect: "none",
@@ -246,7 +250,7 @@ function RackView(props: RackViewProps) {
                         flex: "0 0 auto",
                         alignItems: "center",
                         justifyContent: "center",
-                        width: collapsed ? "100%" : 56,
+                        width: collapsed ? "100%" : 48,
                         height: collapsed ? 56 : "100%"
                     }}
                 >
@@ -304,6 +308,31 @@ function RackView(props: RackViewProps) {
                     >
                         {uiPlugin.name}
                     </Typography>
+                )}
+                {!collapsed && uiPlugin && (
+                    <div style={{ marginLeft: "auto", paddingLeft: 8, flex: "0 0 auto" }}>
+                        <PluginPresetSelector compact
+                            pedalboardItem={item} instanceId={item.instanceId}
+                            enableStructureEditing={props.enableStructureEditing} />
+                    </div>
+                )}
+                {!item.isEmpty() && (
+                    <IconButton
+                        size="small"
+                        aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`}
+                        aria-expanded={!collapsed}
+                        title={`${collapsed ? "Expand" : "Collapse"} ${title}`}
+                        onPointerDown={event => event.stopPropagation()}
+                        onDoubleClick={event => event.stopPropagation()}
+                        onClick={event => {
+                            event.stopPropagation();
+                            props.onToggleCollapsed(item.instanceId);
+                        }}
+                        style={{ flex: "0 0 auto", minHeight: 32, opacity: 0.65,
+                            marginLeft: collapsed ? 0 : (uiPlugin ? 0 : "auto") }}
+                    >
+                        {collapsed ? <ChevronRightIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
+                    </IconButton>
                 )}
             </div>
         );

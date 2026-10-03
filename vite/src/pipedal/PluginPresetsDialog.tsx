@@ -248,7 +248,7 @@ const PluginPresetsDialog = withStyles(
             if (this.isEditMode()) {
                 this.setState({ selectedItem: instanceId });
             } else {
-                this.model.loadPreset(instanceId);
+                this.model.loadPluginPreset(this.props.instanceId, instanceId);
                 this.props.onDialogClose();
             }
         }
@@ -427,43 +427,45 @@ const PluginPresetsDialog = withStyles(
                                                 <IconButtonEx tooltip="Delete"   color="inherit" onClick={(e) => this.handleDeleteClick()} >
                                                     <img src="/img/old_delete_outline_white_24dp.svg" alt="Delete" style={{ width: 24, height: 24, opacity: 0.6 }} />
                                                 </IconButtonEx>
-                                                <IconButtonEx tooltip="More..." color="inherit" onClick={(e) => { this.onMoreClick(e) }} >
-                                                    <MoreVertIcon />
-                                                </IconButtonEx>
-                                                <Menu
-                                                    id="more-menu"
-                                                    anchorEl={this.state.moreMenuAnchorEl}
-                                                    keepMounted
-                                                    open={Boolean(this.state.moreMenuAnchorEl)}
-                                                    onClose={() => this.handleMoreClose()}
-                                                    TransitionComponent={Fade}
-                                                >
-                                                    <MenuItem onClick={() => { this.handleDownloadPresets(); }} 
-                                                        disabled={this.props.presets.presets.length === 0}
-                                                    >
-                                                        <ListItemIcon>
-                                                            <DownloadIcon className={classes.listIcon} />
-                                                        </ListItemIcon>
-                                                        <ListItemText>
-                                                            Download plugin presets
-                                                        </ListItemText>
-
-                                                    </MenuItem>
-                                                    <MenuItem onClick={() => { this.handleUploadPresets() }}>
-                                                        <ListItemIcon>
-                                                            <UploadIcon className={classes.listIcon} />
-                                                        </ListItemIcon>
-                                                        <ListItemText>
-                                                            Upload plugin presets
-                                                        </ListItemText>
-
-                                                    </MenuItem>
-                                                </Menu>
-
-
                                             </div>
                                         )
                                     }
+                                    <div style={{ flex: "0 0 auto" }}>
+                                        <IconButtonEx tooltip="More..." color="inherit" onClick={(e) => { this.onMoreClick(e) }} >
+                                            <MoreVertIcon />
+                                        </IconButtonEx>
+                                        <Menu
+                                            id="more-menu"
+                                            anchorEl={this.state.moreMenuAnchorEl}
+                                            keepMounted
+                                            open={Boolean(this.state.moreMenuAnchorEl)}
+                                            onClose={() => this.handleMoreClose()}
+                                            TransitionComponent={Fade}
+                                        >
+                                            <MenuItem onClick={() => { this.handleDownloadPresets(); }}
+                                                disabled={this.props.presets.presets.length === 0}
+                                            >
+                                                <ListItemIcon>
+                                                    <DownloadIcon className={classes.listIcon} />
+                                                </ListItemIcon>
+                                                <ListItemText>
+                                                    Download plugin presets
+                                                </ListItemText>
+
+                                            </MenuItem>
+                                            <MenuItem onClick={() => { this.handleUploadPresets() }}>
+                                                <ListItemIcon>
+                                                    <UploadIcon className={classes.listIcon} />
+                                                </ListItemIcon>
+                                                <ListItemText>
+                                                    Upload plugin presets
+                                                </ListItemText>
+
+                                            </MenuItem>
+                                        </Menu>
+
+
+                                    </div>
                                 </Toolbar>
 
                             </AppBar>

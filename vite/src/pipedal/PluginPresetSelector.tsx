@@ -18,408 +18,371 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import { SyntheticEvent, Component } from 'react';
-import IconButtonEx from './IconButtonEx';
-import { PiPedalModel, PiPedalModelFactory, PluginPresetsChangedHandle } from './PiPedalModel';
-import { Theme } from '@mui/material/styles';
-import WithStyles from './WithStyles';
-import { withStyles } from "tss-react/mui";
-import { createStyles } from './WithStyles';
-
-import PluginPresetsDialog from './PluginPresetsDialog';
+import Button from '@mui/material/Button';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
+import ListSubheader from '@mui/material/ListSubheader';
+import Divider from '@mui/material/Divider';
 import Fade from '@mui/material/Fade';
-import RenameDialog from './RenameDialog'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { Theme } from '@mui/material/styles';
+import { withStyles } from "tss-react/mui";
+import WithStyles, { createStyles } from './WithStyles';
+import IconButtonEx from './IconButtonEx';
+import { PiPedalModel, PiPedalModelFactory, PluginPresetsChangedHandle, State } from './PiPedalModel';
+import PluginPresetsDialog from './PluginPresetsDialog';
+import RenameDialog from './RenameDialog';
+import OkCancelDialog from './OkCancelDialog';
 import { PluginUiPresets } from './PluginPreset';
-
-import Divider from "@mui/material/Divider";
-
 import PluginPresetsIcon from "./svg/ic_pluginpreset.svg?react";
-import PluginPresetIcon from "./svg/ic_pluginpreset2.svg?react";
-import { Pedalboard, PedalboardItem } from './Pedalboard';
+import { PedalboardItem } from './Pedalboard';
 
 interface PluginPresetSelectorProps extends WithStyles<typeof styles> {
     pedalboardItem: PedalboardItem | null;
     instanceId: number;
+    compact?: boolean;
+    enableStructureEditing?: boolean;
 }
 
+interface SaveTarget {
+    instanceId: number;
+    uri: string;
+    presetId: number;
+    bankId: number;
+}
 
 interface PluginPresetSelectorState {
     presets: PluginUiPresets;
-    //enabled: boolean;
-    presetChanged: boolean;
+    ready: boolean;
+    loading: boolean;
+    loadError: string;
     showPresetsDialog: boolean;
-    showEditPresetsDialog: boolean;
-    presetsMenuAnchorRef: HTMLElement | null;
-
+    menuAnchor: HTMLElement | null;
     renameDialogOpen: boolean;
-    renameDialogDefaultName: string;
-    renameDialogActionName: string;
-    renameDialogOnOk?: (name: string) => void;
-
     saveAsName: string;
-
-    isVisible: boolean;
-    hasPresets: boolean;
+    overwriteName?: string;
     isPastePluginEnabled: boolean;
 }
 
-
 const styles = (theme: Theme) => createStyles({
-    itemIcon: {
-        width: 24, height: 24, marginRight: "4px", opacity: 0.6
-    },
     pluginIcon: {
         width: 24, height: 24, opacity: 0.6, fill: theme.palette.text.primary
-    },
-    pluginMenuIcon: {
-        width: 24, height: 24, opacity: 0.6, fill: theme.palette.text.primary, marginRight: 4
     }
-
 });
-
 
 let pluginClipboardContents: PedalboardItem | null = null;
 
-const PluginPresetSelector =
-    withStyles(
-        class extends Component<PluginPresetSelectorProps, PluginPresetSelectorState> {
+const PluginPresetSelector = withStyles(
+    class extends Component<PluginPresetSelectorProps, PluginPresetSelectorState> {
+        model: PiPedalModel = PiPedalModelFactory.getInstance();
+        private mounted = false;
+        private presetRequest = 0;
+        private submitting = false;
+        private selectedBoard = "";
+        private saveTarget?: SaveTarget;
+        private presetsChangedHandle?: PluginPresetsChangedHandle;
 
-            model: PiPedalModel;
+        constructor(props: PluginPresetSelectorProps) {
+            super(props);
+            this.selectedBoard = this.boardIdentity();
+            this.state = {
+                presets: new PluginUiPresets(),
+                ready: this.model.state.get() === State.Ready,
+                loading: false,
+                loadError: "",
+                showPresetsDialog: false,
+                menuAnchor: null,
+                renameDialogOpen: false,
+                saveAsName: "",
+                isPastePluginEnabled: pluginClipboardContents !== null
+            };
+        }
 
-            constructor(props: PluginPresetSelectorProps) {
-                super(props);
-                this.model = PiPedalModelFactory.getInstance();
-                this.state = {
-                    presets: new PluginUiPresets(),
-                    isVisible: this.isVisible(props.pedalboardItem),
-                    presetChanged: false,
-                    showPresetsDialog: false,
-                    showEditPresetsDialog: false,
-                    presetsMenuAnchorRef: null,
-                    renameDialogOpen: false,
-                    renameDialogDefaultName: "",
-                    renameDialogActionName: "",
-                    renameDialogOnOk: undefined,
-                    saveAsName: "",
-                    hasPresets: this.hasPresets(this.props.pedalboardItem),
-                    isPastePluginEnabled: pluginClipboardContents !== null
+        hasPresets(): boolean {
+            const item = this.props.pedalboardItem;
+            return !!item?.uri && !item.isStart() && !item.isEnd()
+                && !item.isEmpty() && !item.isSplit();
+        }
 
+        effectName(): string {
+            const item = this.props.pedalboardItem;
+            return item?.title || (item && this.model.getUiPlugin(item.uri)?.name)
+                || item?.pluginName || (item?.isSplit() ? "Split" : "Empty slot");
+        }
 
-                };
-                this.handleDialogClose = this.handleDialogClose.bind(this);
-                this.handlePresetsMenuClose = this.handlePresetsMenuClose.bind(this);
+        private boardIdentity(): string {
+            return `${this.model.banks.get().selectedBank}:${this.model.presets.get().selectedInstanceId}`;
+        }
+
+        private resetEffectContext() {
+            this.saveTarget = undefined;
+            this.setState({ menuAnchor: null, showPresetsDialog: false,
+                renameDialogOpen: false, overwriteName: undefined, saveAsName: "" });
+        }
+
+        private onPresetSelectionChanged = () => {
+            const identity = this.boardIdentity();
+            if (identity !== this.selectedBoard) {
+                this.selectedBoard = identity;
+                this.resetEffectContext();
             }
+        };
 
-            hasPresets(pedalboardItem: PedalboardItem | null): boolean {
-                if (pedalboardItem === null) return false;
-                if (!pedalboardItem.uri) return false;
-                if (pedalboardItem.isStart() || pedalboardItem.isEnd()
-                    || pedalboardItem.isEmpty() || pedalboardItem.isSplit()) {
-                    return false;
+        private onStateChanged = (state: State) => {
+            this.setState({ ready: state === State.Ready });
+            if (state === State.Ready) {
+                const uri = this.props.pedalboardItem?.uri;
+                if (uri) this.model.uncachePluginPreset(uri);
+                this.loadPresets();
+            } else {
+                ++this.presetRequest;
+                this.saveTarget = undefined;
+                this.setState({ menuAnchor: null, renameDialogOpen: false,
+                    overwriteName: undefined, showPresetsDialog: false, loading: false });
+            }
+        };
+
+        componentDidMount() {
+            this.mounted = true;
+            this.presetsChangedHandle = this.model.addPluginPresetsChangedListener(uri => {
+                if (uri === this.props.pedalboardItem?.uri) this.loadPresets();
+            });
+            this.model.presets.addOnChangedHandler(this.onPresetSelectionChanged);
+            this.model.banks.addOnChangedHandler(this.onPresetSelectionChanged);
+            // ObservableProperty invokes the handler immediately, including the first load.
+            this.model.state.addOnChangedHandler(this.onStateChanged);
+        }
+
+        componentWillUnmount() {
+            this.mounted = false;
+            ++this.presetRequest;
+            this.saveTarget = undefined;
+            this.model.state.removeOnChangedHandler(this.onStateChanged);
+            this.model.presets.removeOnChangedHandler(this.onPresetSelectionChanged);
+            this.model.banks.removeOnChangedHandler(this.onPresetSelectionChanged);
+            if (this.presetsChangedHandle) {
+                this.model.removePluginPresetsChangedListener(this.presetsChangedHandle);
+            }
+        }
+
+        componentDidUpdate(prevProps: PluginPresetSelectorProps) {
+            const uriChanged = this.props.pedalboardItem?.uri !== prevProps.pedalboardItem?.uri;
+            if (uriChanged || this.props.instanceId !== prevProps.instanceId) {
+                this.resetEffectContext();
+            }
+            if (uriChanged) {
+                ++this.presetRequest;
+                this.setState({ presets: new PluginUiPresets(), loadError: "", loading: false });
+                this.loadPresets();
+            }
+        }
+
+        loadPresets(): void {
+            if (!this.hasPresets() || this.model.state.get() !== State.Ready) return;
+            const uri = this.props.pedalboardItem!.uri;
+            const request = ++this.presetRequest;
+            this.setState({ loading: true, loadError: "" });
+            this.model.getPluginPresets(uri).then(presets => {
+                if (this.mounted && request === this.presetRequest) {
+                    this.setState({ presets, loading: false });
                 }
-                return true;
-            }
-            isVisible(pedalboardItem: PedalboardItem | null): boolean {
-                if (pedalboardItem === null) return false;
-                if (!pedalboardItem.uri) return false;
-                if (pedalboardItem.isStart() || pedalboardItem.isEnd()
-                ) {
-                    return false;
+            }).catch(error => {
+                if (this.mounted && request === this.presetRequest) {
+                    this.setState({ presets: new PluginUiPresets(), loading: false,
+                        loadError: String(error) });
                 }
-                return true;
-            }
+            });
+        }
 
-            handleLoadPluginPreset(instanceId: number) {
-                this.handlePresetsMenuClose();
-                this.model.loadPluginPreset(this.props.instanceId, instanceId);
-                let presetName = this.getPresetName(instanceId);
-                this.setState({ saveAsName: presetName });
+        handleMenuOpen(event: SyntheticEvent) {
+            this.setState({ menuAnchor: event.currentTarget as HTMLElement,
+                isPastePluginEnabled: pluginClipboardContents !== null });
+        }
+
+        handleLoadPluginPreset(presetId: number) {
+            const name = this.state.presets.getItem(presetId)?.label ?? "";
+            this.setState({ menuAnchor: null, saveAsName: name });
+            this.model.loadPluginPreset(this.props.instanceId, presetId);
+        }
+
+        handleSaveAs() {
+            const item = this.props.pedalboardItem;
+            if (!item || !this.hasPresets()) return;
+            this.saveTarget = {
+                instanceId: this.props.instanceId, uri: item.uri,
+                presetId: this.model.presets.get().selectedInstanceId,
+                bankId: this.model.banks.get().selectedBank
+            };
+            this.setState({ menuAnchor: null, renameDialogOpen: true, overwriteName: undefined });
+        }
+
+        private isSaveTargetCurrent(target: SaveTarget): boolean {
+            return this.mounted && this.saveTarget === target
+                && this.model.state.get() === State.Ready
+                && this.props.instanceId === target.instanceId
+                && this.props.pedalboardItem?.uri === target.uri
+                && this.model.pedalboard.get().tryGetItem(target.instanceId)?.uri === target.uri
+                && this.model.presets.get().selectedInstanceId === target.presetId
+                && this.model.banks.get().selectedBank === target.bankId;
+        }
+
+        private async savePreset(name: string, overwrite = false) {
+            if (this.submitting) return;
+            const target = this.saveTarget;
+            if (!target || !this.isSaveTargetCurrent(target)) {
+                this.closeSaveDialog();
+                this.model.showAlert("The effect has changed. Open Save effect preset again.");
+                return;
             }
-            getPresetName(instanceId: number) {
-                for (let preset of this.state.presets.presets) {
-                    if (preset.instanceId === instanceId) {
-                        return preset.label;
+            this.submitting = true;
+            try {
+                if (!overwrite) {
+                    // Saving by name replaces an existing preset, so check the current library.
+                    this.model.uncachePluginPreset(target.uri);
+                    const presets = await this.model.getPluginPresets(target.uri);
+                    if (!this.isSaveTargetCurrent(target)) return;
+                    if (presets.presets.some(preset => preset.label === name)) {
+                        this.setState({ presets, overwriteName: name });
+                        return;
                     }
                 }
-                return "";
-            }
-
-            handlePresetMenuClick(e: SyntheticEvent): void {
-                this.setState({ presetsMenuAnchorRef: (e.currentTarget as HTMLElement) });
-            }
-            handlePresetsMenuClose(): void {
-                this.setState({ presetsMenuAnchorRef: null });
-            }
-
-            handlePluginPresetsMenuSaveAs(e: SyntheticEvent): void {
-                this.handlePresetsMenuClose();
-                e.stopPropagation();
-
-                let name = this.state.saveAsName;
-
-                this.renameDialogOpen(name, "Save As")
-                    .then((newName) => {
-                        this.setState({ saveAsName: newName });
-                        return this.model.saveCurrentPluginPresetAs(this.props.instanceId, newName);
-                    })
-                    .then((newInstanceId) => {
-                        // s'fine. dealt with by updates, but we do need error handling.
-                    })
-                    .catch((error) => {
-                        this.showError(error);
-                    })
-                    ;
-            }
-
-            showError(error: string) {
-                this.model.showAlert(error);
-            }
-            renameDialogOpen(defaultText: string, acceptButtonText: string): Promise<string> {
-                let result = new Promise<string>(
-                    (resolve, reject) => {
-                        this.setState(
-                            {
-                                renameDialogOpen: true,
-                                renameDialogDefaultName: defaultText,
-                                renameDialogActionName: acceptButtonText,
-                                renameDialogOnOk: (name) => {
-                                    resolve(name);
-                                }
-
-                            }
-                        );
-
-                    }
-                );
-                return result;
-            }
-
-            loadPresets(): void {
-                if (this.props.pedalboardItem === null) return;
-                if (!this.hasPresets(this.props.pedalboardItem)) return;
-                let captureUri: string = this.props.pedalboardItem.uri;
-                this.model.getPluginPresets(captureUri)
-                    .then((presets: PluginUiPresets) => {
-                        if (captureUri === this.props.pedalboardItem?.uri) {
-                            this.setState({ presets: presets });
-                        }
-                    })
-                    .catch(error => {
-                        if (captureUri === this.props.pedalboardItem?.uri) {
-                            this.setState({ presets: new PluginUiPresets() });
-                        }
-                    });
-            }
-            onPluginPresetsChanged(pluginUri: string): void {
-                if (pluginUri === this.props.pedalboardItem?.uri) {
-                    this.loadPresets();
-
+                if (!this.isSaveTargetCurrent(target)) return;
+                await this.model.saveCurrentPluginPresetAs(target.instanceId, name);
+                if (this.isSaveTargetCurrent(target)) {
+                    this.saveTarget = undefined;
+                    this.setState({ renameDialogOpen: false, overwriteName: undefined, saveAsName: name });
                 }
-            }
-            _pluginPresetsChangedHandle?: PluginPresetsChangedHandle;
-
-            componentDidMount() {
-                this._pluginPresetsChangedHandle = this.model.addPluginPresetsChangedListener(
-                    (pluginUri: string) => {
-                        this.onPluginPresetsChanged(pluginUri);
-                    }
-                );
-            }
-            componentWillUnmount() {
-                if (this._pluginPresetsChangedHandle) {
-                    this.model.removePluginPresetsChangedListener(this._pluginPresetsChangedHandle);
-                    this._pluginPresetsChangedHandle = undefined;
+            } catch (error) {
+                if (this.isSaveTargetCurrent(target)) {
+                    this.setState({ overwriteName: undefined });
+                    this.model.showAlert("Could not save effect preset: " + String(error));
                 }
+            } finally {
+                this.submitting = false;
             }
+        }
 
-            currentPedalboard?: PedalboardItem;
-            componentDidUpdate(
-                prevProps: Readonly<PluginPresetSelectorProps>,
-                prevState: Readonly<PluginPresetSelectorState>,
-                snapshot?: any): void {
-                if (this.props.pedalboardItem !== prevProps.pedalboardItem) {
-                    this.setState({
-                        isVisible: this.isVisible(this.props.pedalboardItem),
-                        hasPresets: this.hasPresets(this.props.pedalboardItem)
-                    });
-                    if (this.props.pedalboardItem) {
-                        if (this.props.pedalboardItem.isEmpty()) {
-                            this.setState({ presets: new PluginUiPresets() });
-                        } else {
-                            this.loadPresets();
-                        }
+        closeSaveDialog() {
+            if (this.submitting) return;
+            this.saveTarget = undefined;
+            this.setState({ renameDialogOpen: false, overwriteName: undefined });
+        }
+
+        handleCopy() {
+            const item = this.model.pedalboard.get().tryGetItem(this.props.instanceId);
+            pluginClipboardContents = item?.clone() ?? null;
+            this.setState({ menuAnchor: null, isPastePluginEnabled: pluginClipboardContents !== null });
+        }
+
+        handlePaste() {
+            this.setState({ menuAnchor: null });
+            if (pluginClipboardContents) {
+                this.model.replacePedalboarditem(this.props.instanceId, pluginClipboardContents.clone());
+            }
+        }
+
+        buildMenuItems() {
+            const items: React.ReactNode[] = [
+                <ListSubheader key="heading" component="div" disableSticky
+                    style={{ lineHeight: "20px", paddingTop: 8, paddingBottom: 8,
+                        whiteSpace: "normal", overflowWrap: "anywhere", maxWidth: 320 }}>
+                    {this.effectName()}
+                </ListSubheader>
+            ];
+            if (this.hasPresets()) {
+                if (this.state.loading) {
+                    items.push(<MenuItem key="loading" disabled>Loading presets…</MenuItem>);
+                } else if (this.state.loadError) {
+                    items.push(<MenuItem key="retry" onClick={() => this.loadPresets()}
+                        title={this.state.loadError}>Could not load presets. Retry</MenuItem>);
+                } else if (!this.state.presets.presets.length) {
+                    items.push(<MenuItem key="empty" disabled>No saved presets yet</MenuItem>);
+                } else {
+                    for (const preset of this.state.presets.presets) {
+                        items.push(<MenuItem key={preset.instanceId}
+                            style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}
+                            onClick={() => this.handleLoadPluginPreset(preset.instanceId)}>
+                            {preset.label}
+                        </MenuItem>);
                     }
                 }
+                items.push(<Divider key="presets-divider" />);
+                items.push(<MenuItem key="save" onClick={() => this.handleSaveAs()}>Save effect preset…</MenuItem>);
+                items.push(<MenuItem key="manage" disabled={this.state.loading || !!this.state.loadError}
+                    onClick={() => this.setState({ menuAnchor: null, showPresetsDialog: true })}>
+                    Manage presets…
+                </MenuItem>);
             }
-            handleRenameDialogClose(): void {
-                this.setState({
-                    renameDialogOpen: false,
-                    renameDialogOnOk: undefined
-                });
+            if (this.props.enableStructureEditing !== false) {
+                if (this.hasPresets()) items.push(<Divider key="clipboard-divider" />);
+                items.push(<MenuItem key="copy" disabled={!this.props.pedalboardItem || this.props.pedalboardItem.isEmpty()}
+                    onClick={() => this.handleCopy()}>Copy effect</MenuItem>);
+                items.push(<MenuItem key="paste" disabled={!this.state.isPastePluginEnabled}
+                    onClick={() => this.handlePaste()}>Paste effect (replace)</MenuItem>);
             }
+            return items;
+        }
 
-            handleRenameDialogOk(name: string): void {
-                let renameDialogOnOk = this.state.renameDialogOnOk;
-                this.handleRenameDialogClose();
-
-                if (renameDialogOnOk) {
-                    renameDialogOnOk(name);
-                }
-
+        render() {
+            const item = this.props.pedalboardItem;
+            if (!item?.uri || item.isStart() || item.isEnd()
+                || (!this.hasPresets() && (this.props.compact || this.props.enableStructureEditing === false))) {
+                return null;
             }
-
-            isMenuCopyPluginEnabled(): boolean {
-                if (this.props.pedalboardItem === null) return false;   
-                return !this.props.pedalboardItem.isEmpty();
-            }
-            handleMenuCopyPlugin(): void {
-                this.handlePresetsMenuClose();
-                let pedalboard: Pedalboard = this.model.pedalboard.get();;
-
-
-                let pedalboardItem: PedalboardItem | null = pedalboard.tryGetItem(this.props.instanceId);
-                if (pedalboardItem === null) {
-                    pluginClipboardContents = null;
-                    this.setState({ isPastePluginEnabled: false });
-                    return;
-                }
-                pluginClipboardContents = pedalboardItem.clone();
-                this.setState({ isPastePluginEnabled: true });
-
-            }
-
-            private isMenuPastePluginEnabled(): boolean {
-                return this.state.isPastePluginEnabled;
-            }
-            private handleMenuPastePlugin(): void {
-                this.handlePresetsMenuClose();
-
-                if (pluginClipboardContents) {
-                    this.model.replacePedalboarditem(this.props.instanceId, pluginClipboardContents.clone());
-                }
-            }
-
-
-            private handleMenuEditPluginPresets(): void {
-                this.handlePresetsMenuClose();
-                this.showEditPluginPresetsDialog(true);
-            }
-
-            handleSave() {
-                this.model.saveCurrentPreset();
-            }
-
-            showPresetDialog(show: boolean) {
-                this.setState({
-                    showPresetsDialog: show,
-                    showEditPresetsDialog: false
-                });
-            }
-            showEditPluginPresetsDialog(show: boolean) {
-                this.setState({
-                    showPresetsDialog: show,
-                    showEditPresetsDialog: true
-                });
-            }
-
-            handleDialogClose(): void {
-                this.showPresetDialog(false);
-            }
-            handleChange(event: any, extra: any): void {
-                // misses click on default.
-                // this.model.loadPreset(event.target.value as number);
-            }
-            handleSelectClose(event: any): void {
-                let value = event.currentTarget.getAttribute("data-value");
-                if (value && value.length > 0) {
-                    this.model.loadPreset(parseInt(value));
-                }
-                //this.model.loadPreset(event.target.value as number);
-            }
-
-            buildMenuItems() {
-                let result: React.ReactNode[] = [];
-                if (this.state.hasPresets) {
-                    result.push((<MenuItem key="menuSaveAs" onClick={(e) => this.handlePluginPresetsMenuSaveAs(e)}>Save plugin preset...</MenuItem>));
-                    result.push((<MenuItem key="menuEdit" onClick={(e) => this.handleMenuEditPluginPresets()}>Manage plugin presets...</MenuItem>));
-                    result.push((<Divider key="divider1" />));
-                }
-                let hasPresets = false;
-                for (let preset of this.state.presets.presets) {
-                    result.push((
-                        <MenuItem key={preset.instanceId}
-                            onClick={(e) => this.handleLoadPluginPreset(preset.instanceId)}
-                        >
-                            <PluginPresetIcon className={this.props.classes?.pluginMenuIcon ?? ""} />
-
-                            {preset.label}</MenuItem>
-                    ));
-                    hasPresets = true;
-                }
-                if (hasPresets) {
-                    result.push((<Divider key="divider2" />));
-                }
-                result.push(
-                    <MenuItem key="menuCopy" disabled={!this.isMenuCopyPluginEnabled()} onClick={(e) => this.handleMenuCopyPlugin()}>Copy plugin</MenuItem>
-                );
-                result.push(
-                    <MenuItem key="menuPaste" disabled={!this.isMenuPastePluginEnabled()} style={{ opacity: this.isMenuPastePluginEnabled() ? 1 : 0.4 }} onClick={(e) => this.handleMenuPastePlugin()}>Paste plugin</MenuItem>
-                );
-                return result;
-            }
-            render() {
-                const classes = withStyles.getClasses(this.props);
-
-                //const classes = withStyles.getClasses(this.props);
-                //const classes = withStyles.getClasses(this.props);
-                if (!this.state.isVisible) {
-                    return (<div />);
-                }
-                return (
-                    <div >
-                        <IconButtonEx
-                            tooltip="Plugin presets"
-                            onClick={(e) => this.handlePresetMenuClick(e)} size="large">
+            const classes = withStyles.getClasses(this.props);
+            const menuId = `effect-presets-${this.props.instanceId}-${this.props.compact ? "inline" : "toolbar"}`;
+            const buttonId = menuId + "-button";
+            const open = Boolean(this.state.menuAnchor);
+            const buttonProps = {
+                id: buttonId,
+                "aria-label": `Presets for ${this.effectName()}`,
+                "aria-haspopup": "menu" as const,
+                "aria-expanded": open,
+                "aria-controls": open ? menuId : undefined,
+                disabled: !this.state.ready,
+                onClick: (event: SyntheticEvent) => this.handleMenuOpen(event)
+            };
+            return (
+                <div style={{ flex: "0 0 auto" }}
+                    onPointerDown={event => event.stopPropagation()}
+                    onClick={event => event.stopPropagation()}
+                    onDoubleClick={event => event.stopPropagation()}>
+                    {this.props.compact ? (
+                        <Button {...buttonProps} size="small" color="inherit" endIcon={<ExpandMoreIcon />}
+                            style={{ minHeight: 32, minWidth: 0, padding: "4px 8px", fontSize: "0.75rem",
+                                fontWeight: 500, textTransform: "none", opacity: 0.8 }}>
+                            Presets
+                        </Button>
+                    ) : (
+                        <IconButtonEx {...buttonProps} tooltip="Effect presets" size="large">
                             <PluginPresetsIcon className={classes.pluginIcon} />
                         </IconButtonEx>
-                        <Menu
-                            id="edit-plugin-presets-menu"
-                            anchorEl={this.state.presetsMenuAnchorRef}
-                            open={Boolean(this.state.presetsMenuAnchorRef)}
-                            onClose={() => this.handlePresetsMenuClose()}
-                            TransitionComponent={Fade}
-                            MenuListProps={
-                                {
-                                    style: { minWidth: 180 }
-                                }
+                    )}
+                    <Menu id={menuId} anchorEl={this.state.menuAnchor} open={open}
+                        onClose={() => this.setState({ menuAnchor: null })} TransitionComponent={Fade}
+                        MenuListProps={{ "aria-labelledby": buttonId, style: { minWidth: 220 } }}>
+                        {this.buildMenuItems()}
+                    </Menu>
+                    {this.hasPresets() && this.state.showPresetsDialog && (
+                        <PluginPresetsDialog instanceId={this.props.instanceId} presets={this.state.presets}
+                            show isEditDialog onDialogClose={() => this.setState({ showPresetsDialog: false })} />
+                    )}
+                    <RenameDialog open={this.state.renameDialogOpen} title={`Save ${this.effectName()} preset`}
+                        label="Preset name" defaultName={this.state.saveAsName} acceptActionName="Save"
+                        useSafeFilenames={false} onClose={() => this.closeSaveDialog()}
+                        onOk={name => { void this.savePreset(name); }} />
+                    <OkCancelDialog open={this.state.overwriteName !== undefined}
+                        text={`Replace effect preset "${this.state.overwriteName ?? ""}" with the current settings?`}
+                        okButtonText="Overwrite"
+                        onClose={() => { if (!this.submitting) this.setState({ overwriteName: undefined }); }}
+                        onOk={() => {
+                            if (this.state.overwriteName !== undefined) {
+                                void this.savePreset(this.state.overwriteName, true);
                             }
-
-                        >
-                            {
-                                this.buildMenuItems()
-                            }
-                        </Menu>
-                        {this.state.hasPresets && this.state.showPresetsDialog && (
-                            <PluginPresetsDialog
-                                instanceId={this.props.instanceId}
-                                presets={this.state.presets}
-                                show={this.state.showPresetsDialog}
-                                isEditDialog={this.state.showEditPresetsDialog}
-                                onDialogClose={() => this.handleDialogClose()} />
-                        )}
-                        <RenameDialog open={this.state.renameDialogOpen}
-                            title="Rename"
-                            defaultName={this.state.renameDialogDefaultName}
-                            acceptActionName={this.state.renameDialogActionName}
-                            useSafeFilenames={false}
-                            onClose={() => this.handleRenameDialogClose()}
-                            onOk={(name: string) => this.handleRenameDialogOk(name)} />
-                    </div>
-                );
-
-            }
-        },
-        styles);
+                        }} />
+                </div>
+            );
+        }
+    }, styles);
 
 export default PluginPresetSelector;

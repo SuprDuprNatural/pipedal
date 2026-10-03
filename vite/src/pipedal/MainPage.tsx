@@ -27,7 +27,7 @@ import ButtonBase from '@mui/material/ButtonBase';
 import PluginIcon, { getIconColor } from './PluginIcon';
 
 import ToolTipEx from './ToolTipEx';
-import { PiPedalModel, PiPedalModelFactory } from './PiPedalModel';
+import { PiPedalModel, PiPedalModelFactory, State } from './PiPedalModel';
 import {
     Pedalboard, PedalboardItem, PedalboardSplitItem, SplitType
 } from './Pedalboard';
@@ -222,7 +222,7 @@ export const MainPage =
                         screenHeight: this.windowSize.height,
                         showModUi: false,
                         controlView: getMainViewPreference(),
-                        collapsedRackItems: new Set<number>()
+                        collapsedRackItems: new Set<number>(),
 
 
                     };
@@ -368,12 +368,38 @@ export const MainPage =
                     super.componentDidMount();
                     this.model.pedalboard.addOnChangedHandler(this.onPedalboardChanged);
                     this.model.selectedSnapshot.addOnChangedHandler(this.onSelectedSnapshotChanged);
+                    document.addEventListener("keydown", this.onShortcut);
                 }
                 componentWillUnmount() {
+                    document.removeEventListener("keydown", this.onShortcut);
                     this.model.selectedSnapshot.removeOnChangedHandler(this.onSelectedSnapshotChanged);
                     this.model.pedalboard.removeOnChangedHandler(this.onPedalboardChanged);
                     super.componentWillUnmount();
                 }
+
+                onShortcut = (event: KeyboardEvent) => {
+                    if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey
+                        || !(event.ctrlKey || event.metaKey)) return;
+                    const target = event.target;
+                    if ((target instanceof Element && target.closest(
+                        'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"]'))
+                        || Array.from(document.querySelectorAll('[role="dialog"], [role="menu"]')).some(element =>
+                            !element.closest('[aria-hidden="true"]') && element.getClientRects().length > 0)) return;
+                    const key = event.key.toLowerCase();
+                    const history = this.model.effectPresetHistory.get();
+                    if (key === "z" || (key === "y" && event.ctrlKey)) {
+                        event.preventDefault();
+                        if (history.busy) return;
+                        if (key === "y" || event.shiftKey) {
+                            if (history.canRedo) void this.model.redoEffectPreset();
+                        } else if (history.canUndo) {
+                            void this.model.undoEffectPreset();
+                        }
+                    } else if (key === "s" && !event.shiftKey) {
+                        event.preventDefault();
+                        if (this.model.state.get() === State.Ready && this.model.presetChanged.get()) this.model.saveCurrentPreset();
+                    }
+                };
 
                 componentDidUpdate(prevProps: MainProps, prevState: MainState) {
                     if (prevState.selectedPedal !== this.state.selectedPedal
@@ -613,11 +639,18 @@ export const MainPage =
 
                                         )}
                                 </div>
+                                {this.state.controlView === "single" && uiPlugin && pedalboardItem && (
+                                    <div style={{ flex: "0 0 auto", marginLeft: 8 }}>
+                                        <PluginPresetSelector compact pedalboardItem={pedalboardItem}
+                                            instanceId={pedalboardItem.instanceId}
+                                            enableStructureEditing={this.props.enableStructureEditing} />
+                                    </div>
+                                )}
                                 <div style={{ flex: "0 0 auto", verticalAlign: "center" }}>
                                     <PluginInfoDialog plugin_uri={infoPluginUri} />
                                 </div>
 
-                                {modGuiButtonVisible && (
+                                {modGuiButtonVisible && canShowModUi && (
                                     <div style={{ flex: "0 0 auto" }}>
                                         <IconButtonEx
                                             style={{ opacity: canShowModUi ? 1.0 : 0.4 }}
@@ -760,7 +793,7 @@ export const MainPage =
                                         </div>
                                     </div>
                                     {
-                                        (!this.state.splitControlBar || !this.props.enableStructureEditing)
+                                        !this.state.splitControlBar
                                         && this.titleBar(pedalboardItem, canShowModUi)
                                     }
                                     <div style={{ flex: "1 1 1px" }}>
@@ -828,10 +861,10 @@ export const MainPage =
                                     </div>
                                     {this.props.enableStructureEditing && (
                                         <div style={{ flex: "0 0 auto", display: "flex", flexFlow: "row nowrap", alignItems: "center" }}>
-                                            <div style={{ flex: "0 0 auto" }}>
+                                            {(pedalboardItem?.isEmpty() || pedalboardItem?.isSplit() || missing) && <div style={{ flex: "0 0 auto" }}>
                                                 <PluginPresetSelector pedalboardItem={pedalboardItem} instanceId={pedalboardItem?.instanceId ?? 0}
                                                 />
-                                            </div>
+                                            </div>}
 
                                             <div style={{ flex: "0 0 auto", display: (canInsert || canAppend) ? "block" : "none" }}>
                                                 <IconButtonEx tooltip="Add pedal slot" onClick={(e) => { this.onAddClick(e) }} size="large">
@@ -895,7 +928,7 @@ export const MainPage =
                                 </div>
                             </div>
                             {
-                                this.state.splitControlBar && this.props.enableStructureEditing && (
+                                this.state.splitControlBar && (
                                     <div className={classes.splitControlBar}>
                                         {
                                             this.titleBar(pedalboardItem, canShowModUi)
@@ -921,6 +954,7 @@ export const MainPage =
                                             pedalboard={this.state.pedalboard}
                                             selectedId={this.state.selectedPedal}
                                             displayAuthor={this.state.displayAuthor}
+                                            enableStructureEditing={this.props.enableStructureEditing}
                                             theme={this.props.theme}
                                             onSelectionChanged={(instanceId) => {
                                                 this.onSelectionChanged(instanceId);

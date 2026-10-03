@@ -28,11 +28,13 @@ import { PiPedalModelFactory } from './PiPedalModel';
 import { GetControlView } from './ControlViewFactory';
 import { FitContentContext } from './PluginControlView';
 import { isDarkMode } from './DarkMode';
+import PluginPresetSelector from './PluginPresetSelector';
 
 interface StackedRackViewProps {
     pedalboard: Pedalboard;
     selectedId: number;
     displayAuthor: boolean;
+    enableStructureEditing: boolean;
     theme: Theme;
     onSelectionChanged: (instanceId: number) => void;
 }
@@ -76,14 +78,14 @@ function StackedRackView(props: StackedRackViewProps) {
                         alignItems: "center",
                         height: 40,
                         paddingLeft: 8,
-                        paddingRight: 16,
+                        paddingRight: 8,
                         cursor: "pointer",
                         background: isDarkMode()
                             ? "rgba(255,255,255,0.06)"
                             : "rgba(0,0,0,0.04)"
                     }}
                 >
-                    <div style={{ flex: "0 0 auto", width: 56 }}>
+                    <div style={{ flex: "0 0 auto", width: 48 }}>
                         {uiPlugin && (
                             <Switch
                                 color="secondary"
@@ -131,6 +133,13 @@ function StackedRackView(props: StackedRackViewProps) {
                         >
                             {uiPlugin.name}
                         </Typography>
+                    )}
+                    {uiPlugin && (
+                        <div style={{ marginLeft: "auto", flex: "0 0 auto" }}>
+                            <PluginPresetSelector compact
+                                pedalboardItem={item} instanceId={item.instanceId}
+                                enableStructureEditing={props.enableStructureEditing} />
+                        </div>
                     )}
                 </div>
                 <div

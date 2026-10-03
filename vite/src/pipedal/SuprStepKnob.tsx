@@ -72,6 +72,7 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
 
     const model: PiPedalModel = PiPedalModelFactory.getInstance();
     const dark = isDarkMode();
+    const knobRef = React.useRef<HTMLDivElement | null>(null);
 
     const snap = React.useCallback((v: number) => {
         const s = min + Math.round((v - min) / step) * step;
@@ -99,6 +100,7 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
     };
 
     const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+        e.currentTarget.focus({ preventScroll: true });
         e.currentTarget.setPointerCapture?.(e.pointerId);
         drag.current = {
             pointerId: e.pointerId, y: e.clientY, from: shown, value: shown
@@ -127,11 +129,19 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
         e.preventDefault();
         e.stopPropagation();
     };
-    const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const onWheel = (e: WheelEvent) => {
+        if (document.activeElement !== knobRef.current || e.deltaY === 0)
+            return;
         e.preventDefault();
         e.stopPropagation();
         commit(shown + (e.deltaY < 0 ? step : -step), true);
     };
+    // Use a non-passive listener so focused adjustment does not scroll the rack.
+    React.useEffect(() => {
+        const knob = knobRef.current;
+        knob?.addEventListener("wheel", onWheel, { passive: false });
+        return () => knob?.removeEventListener("wheel", onWheel);
+    });
     const onDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
         commit(defaultValue, true);
         e.preventDefault();
@@ -219,6 +229,7 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
                 {label}
             </div>
             <div
+                ref={knobRef}
                 className="supr-step-knob-input"
                 role="slider"
                 tabIndex={0}
@@ -231,7 +242,6 @@ export default function SuprStepKnob(props: SuprStepKnobProps) {
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
-                onWheel={onWheel}
                 onDoubleClick={onDoubleClick}
                 onKeyDown={onKeyDown}
                 style={{

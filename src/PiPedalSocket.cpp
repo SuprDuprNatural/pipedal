@@ -397,6 +397,36 @@ JSON_MAP_REFERENCE(LoadPluginPresetBody, pluginInstanceId)
 JSON_MAP_REFERENCE(LoadPluginPresetBody, presetInstanceId)
 JSON_MAP_END()
 
+class LoadPluginPresetWithUndoBody
+{
+public:
+    int64_t bankId_ = -1, presetId_ = -1, instanceId_ = -1;
+    uint64_t pluginPresetId_ = 0;
+    std::string uri_;
+    DECLARE_JSON_MAP(LoadPluginPresetWithUndoBody);
+};
+JSON_MAP_BEGIN(LoadPluginPresetWithUndoBody)
+JSON_MAP_REFERENCE(LoadPluginPresetWithUndoBody, bankId)
+JSON_MAP_REFERENCE(LoadPluginPresetWithUndoBody, presetId)
+JSON_MAP_REFERENCE(LoadPluginPresetWithUndoBody, instanceId)
+JSON_MAP_REFERENCE(LoadPluginPresetWithUndoBody, pluginPresetId)
+JSON_MAP_REFERENCE(LoadPluginPresetWithUndoBody, uri)
+JSON_MAP_END()
+
+class RestorePluginPresetStateBody
+{
+public:
+    int64_t bankId_ = -1, presetId_ = -1;
+    PedalboardItem expected_, target_;
+    DECLARE_JSON_MAP(RestorePluginPresetStateBody);
+};
+JSON_MAP_BEGIN(RestorePluginPresetStateBody)
+JSON_MAP_REFERENCE(RestorePluginPresetStateBody, bankId)
+JSON_MAP_REFERENCE(RestorePluginPresetStateBody, presetId)
+JSON_MAP_REFERENCE(RestorePluginPresetStateBody, expected)
+JSON_MAP_REFERENCE(RestorePluginPresetStateBody, target)
+JSON_MAP_END()
+
 class FromToBody
 {
 public:
@@ -1392,6 +1422,24 @@ public:
         this->model.LoadPluginPreset(body.pluginInstanceId_, body.presetInstanceId_);
     }
     REGISTER_MESSAGE_HANDLER(loadPluginPreset)
+
+    void handle_loadPluginPresetWithUndo(int replyTo, json_reader *pReader)
+    {
+        LoadPluginPresetWithUndoBody body;
+        pReader->read(&body);
+        Reply(replyTo, "loadPluginPresetWithUndo", model.LoadPluginPresetWithUndo(
+            body.bankId_, body.presetId_, body.instanceId_, body.uri_, body.pluginPresetId_));
+    }
+    REGISTER_MESSAGE_HANDLER(loadPluginPresetWithUndo)
+
+    void handle_restorePluginPresetState(int replyTo, json_reader *pReader)
+    {
+        RestorePluginPresetStateBody body;
+        pReader->read(&body);
+        Reply(replyTo, "restorePluginPresetState", model.RestorePluginPresetState(
+            body.bankId_, body.presetId_, body.expected_, body.target_));
+    }
+    REGISTER_MESSAGE_HANDLER(restorePluginPresetState)
 
     void handle_setJackServerSettings(int replyTo, json_reader *pReader)
     {

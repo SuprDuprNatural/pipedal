@@ -38,6 +38,9 @@ playing. There is also a **Rack view**, a stacked, collapsible variant of the
 same idea, alongside the stock single-effect view. Nothing upstream is removed;
 these sit beside it.
 
+Each effect has its own unobtrusive **Presets** dropdown for reusing sounds
+across pedalboards. See [effect presets and editing workflow](docs/EffectPresets.md).
+
 The pedals shown above are **SuprPedals**, a separate LV2 plugin project. Their
 console-style faces do live in this fork, because that is where PiPedal's plugin
 UIs are defined — but they are matched by exact plugin URI, so they simply never

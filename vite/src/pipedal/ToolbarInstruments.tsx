@@ -1,6 +1,10 @@
 // The built-in tuner follows the main input, regardless of the current pedalboard.
 // MIT license, (c) 2026 SuprPedals contributors.
 import { useEffect, useState } from 'react';
+import Box from '@mui/material/Box';
+import UndoIcon from '@mui/icons-material/Undo';
+import RedoIcon from '@mui/icons-material/Redo';
+import IconButtonEx from './IconButtonEx';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { PiPedalModelFactory, State, type TunerFrame } from './PiPedalModel';
 import OutputMeter from './OutputMeter';
@@ -99,9 +103,34 @@ function TopTuner() {
 export default function ToolbarInstruments() {
     const showMeter = useMediaQuery('(min-width: 901px)');
     const showTuner = useMediaQuery('(min-width: 1121px)');
-    if (!showMeter) return null;
-    return <div className="supr-toolbar-instruments">
-        {showTuner && <TopTuner />}
-        <OutputMeter />
-    </div>;
+    const model = PiPedalModelFactory.getInstance();
+    const [history, setHistory] = useState(model.effectPresetHistory.get());
+    useEffect(() => {
+        model.effectPresetHistory.addOnChangedHandler(setHistory);
+        return () => model.effectPresetHistory.removeOnChangedHandler(setHistory);
+    }, [model]);
+    const action = history.canRedo ? 'Redo' : 'Undo';
+    return <>
+        {(history.canUndo || history.canRedo) && <Box sx={{
+            display: 'flex', alignItems: 'center', flex: '0 1 auto', minWidth: 36,
+            maxWidth: { xs: 140, sm: 220 }, height: 36, ml: 1, mr: showMeter ? 0 : 1,
+            bgcolor: '#25282b', color: '#e0e2e4', border: '1px solid #ffffff1f', borderRadius: '5px',
+        }}>
+            <Box component="span" role="status" title={history.label} sx={{
+                pl: 1.25, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap', fontSize: 12,
+            }}>{history.label}</Box>
+            <IconButtonEx color="inherit" size="small" sx={{ flex: '0 0 34px', height: 34 }}
+                aria-label={`${action} ${history.label}`}
+                tooltip={`${action} ${history.label} (Ctrl/⌘ ${history.canRedo ? 'Shift Z' : 'Z'})`}
+                disabled={history.busy}
+                onClick={() => { void (history.canRedo ? model.redoEffectPreset() : model.undoEffectPreset()); }}>
+                {history.canRedo ? <RedoIcon fontSize="small" /> : <UndoIcon fontSize="small" />}
+            </IconButtonEx>
+        </Box>}
+        {showMeter && <div className="supr-toolbar-instruments">
+            {showTuner && <TopTuner />}
+            <OutputMeter />
+        </div>}
+    </>;
 }

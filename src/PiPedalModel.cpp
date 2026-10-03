@@ -812,7 +812,7 @@ void PiPedalModel::FireBanksChanged(int64_t clientId)
     }
 }
 
-void PiPedalModel::FirePedalboardChanged(int64_t clientId, bool loadAudioThread)
+void PiPedalModel::FirePedalboardChanged(int64_t clientId, bool loadAudioThread, bool refreshHardware)
 {
     SubscriberList subscribers;
     {
@@ -841,7 +841,7 @@ void PiPedalModel::FirePedalboardChanged(int64_t clientId, bool loadAudioThread)
     // preset's mappings. Trigger/toggle bindings ignore refresh events.
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
-        if (gpioManager)
+        if (gpioManager && refreshHardware)
         {
             gpioManager->Refresh();
         }
@@ -2836,7 +2836,7 @@ PluginUiPresets PiPedalModel::GetPluginUiPresets(const std::string &pluginUri)
     return storage.GetPluginUiPresets(pluginUri);
 }
 
-void PiPedalModel::LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetInstanceId)
+void PiPedalModel::LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetInstanceId, bool refreshHardware)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
@@ -2846,6 +2846,12 @@ void PiPedalModel::LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetIns
         int32_t oldStateUpdateCount = pedalboardItem->stateUpdateCount();
 
         PluginPresetValues presetValues = storage.GetPluginPresetValues(pedalboardItem->uri(), presetInstanceId);
+        if (auto info = GetPluginInfo(pedalboardItem->uri()))
+            for (const auto &port : info->ports())
+                if (port->is_bypass())
+                    for (auto &control : presetValues.controls)
+                        if (control.key() == port->symbol())
+                            control.value(pedalboardItem->isEnabled() ? 1.0f : 0.0f);
         // if the plugin has state, we have to rebuild the pedalboard, since setting state is not thread-safe.
         // Same goes if lilvPresetUri is not empty.
 
@@ -2875,10 +2881,109 @@ void PiPedalModel::LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetIns
             pedalboardItem->lilvPresetUri(presetValues.lilvPresetUri);
             pedalboardItem->stateUpdateCount(oldStateUpdateCount + 1);
             pedalboardItem->pathProperties(presetValues.pathProperties);
-            FirePedalboardChanged(-1); // does a complete reload of both client and audio server.
+            FirePedalboardChanged(-1, true, refreshHardware); // reload both client and audio server.
         }
         this->SetPresetChanged(-1, true);
     }
+}
+
+PedalboardItem PiPedalModel::CapturePluginPresetState(int64_t instanceId)
+{
+    auto *item = pedalboard.GetItem(instanceId);
+    auto *effect = lv2Pedalboard ? lv2Pedalboard->GetEffect(instanceId) : nullptr;
+    if (!item || !effect || item->isEmpty() || item->isSplit())
+        throw PiPedalException("The effect is no longer available.");
+
+    // Read the live plugin, not the potentially stale state cached by the UI.
+    if (effect->IsVst3())
+    {
+#if ENABLE_VST3
+        std::vector<uint8_t> state;
+        if (!static_cast<Vst3Effect *>(effect)->GetState(&state))
+            throw PiPedalException("Could not capture the effect state for undo.");
+        item->vstState(BytesToHex(state));
+#else
+        throw PiPedalException("This effect does not support state capture.");
+#endif
+    }
+    else
+    {
+        Lv2PluginState state;
+        effect->GetLv2State(&state); // false means a stateless effect; errors propagate.
+        item->lv2State(state);
+    }
+    return *item;
+}
+
+static bool SamePluginSound(const PedalboardItem &left, const PedalboardItem &right)
+{
+    if (left.instanceId() != right.instanceId() || left.uri() != right.uri()
+        || left.lv2State() != right.lv2State() || left.vstState() != right.vstState()
+        || left.pathProperties() != right.pathProperties()
+        || left.lilvPresetUri() != right.lilvPresetUri()
+        || left.controlValues().size() != right.controlValues().size()) return false;
+    for (const auto &control : left.controlValues())
+    {
+        const auto *other = right.GetControlValue(control.key());
+        if (!other || control.value() != other->value()) return false;
+    }
+    return true;
+}
+
+std::vector<PedalboardItem> PiPedalModel::LoadPluginPresetWithUndo(int64_t bankId, int64_t presetId,
+    int64_t instanceId, const std::string &uri, uint64_t pluginPresetId)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto *item = pedalboard.GetItem(instanceId);
+    if (bankId != storage.GetBanks().selectedBank() || presetId != storage.GetCurrentPresetId()
+        || !item || item->uri() != uri)
+        throw PiPedalException("The pedalboard changed. Select the effect preset again.");
+    auto before = CapturePluginPresetState(instanceId);
+    const bool stateful = before.lv2State().isValid_
+        || lv2Pedalboard->GetEffect(instanceId)->IsVst3();
+    if (stateful)
+    {
+        SyncLv2State();
+        UpdateVst3Settings(pedalboard);
+        previousPedalboardLoaded = false;
+    }
+    LoadPluginPreset(instanceId, pluginPresetId, false);
+    // Stateful effects must finish loading before their new opaque state is captured.
+    // The normal control-only fast path queues changes on the audio thread.
+    if (stateful && !previousPedalboardLoaded) FirePedalboardChanged(-1, true, false);
+    auto after = CapturePluginPresetState(instanceId);
+    return {std::move(before), std::move(after)};
+}
+
+PedalboardItem PiPedalModel::RestorePluginPresetState(int64_t bankId, int64_t presetId,
+    const PedalboardItem &expected, const PedalboardItem &target)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (bankId != storage.GetBanks().selectedBank() || presetId != storage.GetCurrentPresetId()
+        || expected.instanceId() != target.instanceId() || expected.uri() != target.uri())
+        throw PiPedalException("The pedalboard changed. Effect preset undo is no longer available.");
+    auto current = CapturePluginPresetState(expected.instanceId());
+    if (!SamePluginSound(current, expected))
+        throw PiPedalException("The effect settings changed. Effect preset undo is no longer available.");
+
+    SyncLv2State();
+    UpdateVst3Settings(pedalboard);
+    auto *item = pedalboard.GetItem(target.instanceId());
+    // Keep the live identity, bypass, routing, bindings and visual metadata.
+    item->controlValues(target.controlValues());
+    item->lv2State(target.lv2State());
+    item->vstState(target.vstState());
+    item->pathProperties(target.pathProperties());
+    item->lilvPresetUri(target.lilvPresetUri());
+    item->stateUpdateCount(item->stateUpdateCount() + 1);
+    if (auto info = GetPluginInfo(item->uri()))
+        for (const auto &port : info->ports())
+            if (port->is_bypass()) item->SetControlValue(port->symbol(), item->isEnabled() ? 1.0f : 0.0f);
+    // A fresh graph restores opaque LV2/VST state as well as controls and paths.
+    previousPedalboardLoaded = false;
+    FirePedalboardChanged(-1, true, false);
+    SetPresetChanged(-1, true);
+    return CapturePluginPresetState(target.instanceId());
 }
 
 void PiPedalModel::DeleteAtomOutputListeners(int64_t clientId)

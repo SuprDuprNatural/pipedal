@@ -37,6 +37,7 @@ export interface SuprControlItem {
     supr: string;
     marks?: SuprKnobMarks;
     markCount?: number;
+    centerValue?: number;
     step?: number;
     showReadout?: boolean;
     showPointer?: boolean;
@@ -333,6 +334,7 @@ function renderPanelItem(item: PanelItem,
                 fallback={nodes[request.supr]}
                 marks={request.marks}
                 markCount={request.markCount}
+                centerValue={request.centerValue}
                 step={request.step}
                 showReadout={request.showReadout}
                 showPointer={request.showPointer}
@@ -401,6 +403,8 @@ interface SuprPanelUnitProps {
     // readout that belongs to the whole pedal rather than to one section.
     // The columns' own top walls become the rule beneath it.
     header?: ReactNode;
+    // Optionally keep the header over the first N columns; others start at the top.
+    headerColumns?: number;
     // read by PluginControlView: opt out of the fixed-height control slot
     tallControl?: boolean;
 }
@@ -429,7 +433,9 @@ export class SuprPanelUnit extends React.Component<SuprPanelUnitProps, { windowW
     }
 
     render() {
-        const maxWidth = Math.max(this.state.windowWidth - PANEL_WINDOW_MARGIN, 300);
+        // Keep the normal compact floor, but let columns wrap on narrow phones.
+        const maxWidth = Math.max(this.state.windowWidth - PANEL_WINDOW_MARGIN,
+            Math.min(300, this.state.windowWidth - 48));
         const suprContext: SuprControlContext | undefined =
             this.props.instanceId !== undefined
                 && this.props.uri !== undefined
@@ -440,6 +446,30 @@ export class SuprPanelUnit extends React.Component<SuprPanelUnitProps, { windowW
                     controlValues: this.props.controlValues
                 }
                 : undefined;
+        const columns = this.props.columns.map((column, i) => (
+            <div key={i} style={{
+                flex: "0 0 auto",
+                display: "flex", flexFlow: "column nowrap",
+                alignItems: "stretch",
+                borderLeft: i === 0 ? undefined : WALL,
+                marginTop: -4, borderTop: WALL
+            }}>
+                {column.sections.map((section, si) =>
+                    renderSection(section, this.props.nodes, si, si === 0, suprContext)
+                )}
+            </div>
+        ));
+        const header = this.props.header && (
+                        <div style={{
+                            display: "flex", justifyContent: "center",
+                            alignItems: "center",
+                            // the columns below pull up 4px onto their own
+                            // top wall, which is what draws the rule here
+                            paddingTop: 8, paddingBottom: 10
+                        }}>
+                            {this.props.header}
+                        </div>
+                    );
         return (
             <div style={{
                 display: "flex", flexFlow: "row nowrap",
@@ -458,41 +488,21 @@ export class SuprPanelUnit extends React.Component<SuprPanelUnitProps, { windowW
                     border: "4px #888 solid", borderRadius: 8,
                     overflow: "hidden", marginBottom: 8
                 }}>
-                    {this.props.header && (
-                        <div style={{
-                            display: "flex", justifyContent: "center",
-                            alignItems: "center",
-                            // the columns below pull up 4px onto their own
-                            // top wall, which is what draws the rule here
-                            paddingTop: 8, paddingBottom: 10
-                        }}>
-                            {this.props.header}
-                        </div>
-                    )}
+                    {!this.props.headerColumns && header}
                     <div style={{
                         display: "flex", flexFlow: "row wrap",
                         alignItems: "stretch", justifyContent: "center"
                     }}>
-                        {this.props.columns.map((column, i) => (
-                            <div key={i} style={{
-                                // content-hugging: the unit is exactly as wide
-                                // as its sections, like the TooB EQ face
-                                flex: "0 0 auto",
-                                display: "flex", flexFlow: "column nowrap",
-                                alignItems: "stretch",
-                                borderLeft: i === 0 ? undefined : WALL,
-                                // merges into the outer border (or the header's
-                                // bottom padding) on the first row; separates
-                                // wrapped rows below it
-                                marginTop: -4, borderTop: WALL
-                            }}>
-                                {column.sections.map((section, si) =>
-                                    renderSection(
-                                        section, this.props.nodes, si, si === 0,
-                                        suprContext
-                                    ))}
+                        {this.props.headerColumns && (
+                            <div style={{ flex: "0 1 auto", minWidth: 0, maxWidth }}>
+                                {header}
+                                <div style={{ display: "flex", flexFlow: "row wrap",
+                                    alignItems: "stretch", justifyContent: "center" }}>
+                                    {columns.slice(0, this.props.headerColumns)}
+                                </div>
                             </div>
-                        ))}
+                        )}
+                        {columns.slice(this.props.headerColumns ?? 0)}
                     </div>
                 </div>
             </div>

@@ -165,6 +165,7 @@ interface PanelContext {
 // the columns that sit under it.
 interface PanelSpec {
     header?: React.ReactNode;
+    headerColumns?: number;
     columns: PanelColumn[];
 }
 type PanelBuilder = (ctx: PanelContext) => PanelColumn[] | PanelSpec;
@@ -211,7 +212,7 @@ function makePanelView(builder: PanelBuilder) {
                     Array.isArray(built) ? { columns: built } : built;
                 return [(
                     <SuprPanelUnit key="supr_panel" columns={spec.columns}
-                        header={spec.header} nodes={nodes}
+                        header={spec.header} headerColumns={spec.headerColumns} nodes={nodes}
                         instanceId={this.props.instanceId}
                         uri={this.props.item.uri}
                         controlValues={controlValues}
@@ -245,7 +246,8 @@ const SuprOctaveView = makePanelView(() => [
             noLabelSlot: true,
             rows: [
                 [{ supr: "direct", marks: "home" }, { supr: "oct1", marks: "home" }],
-                [{ supr: "tone", marks: "home" }, { supr: "gate", marks: "home" }]
+                [{ supr: "drive", marks: "fill" }, { supr: "gate", marks: "home" }],
+                [{ supr: "highpass", marks: "home" }, { supr: "tone", marks: "home" }]
             ]
         }]
     }
@@ -755,20 +757,24 @@ export class SuprForgeViewFactory implements IControlViewFactory {
     }
 }
 
-// Time effects keep the undelayed dry path at unity. Send controls wet excitation.
+// Independent dry and wet return levels; Send controls excitation.
 const SuprEchoView = makePanelView((ctx) => ({
     columns: [
         { sections: [{ label: "Repeats", rows: [["time"], ["feedback"],
             [<SuprEchoActions key="echo_timing" instanceId={ctx.instanceId} division={ctx.controlValues.division ?? 0} />]] }] },
         { sections: [{ label: "Colour", rows: [["tone"], ["lowcut"], ["recovery"]] }] },
-        { sections: [{ label: "Return", rows: [["mix"], ["duck"], ["send"]] }] }
+        { sections: [{ label: "Return", rows: [[{ supr: "dry", marks: "home", centerValue: 0 }],
+            [{ supr: "wet", marks: "home", centerValue: 0 }], ["duck"],
+            [{ supr: "send", compact: true, hideLabel: true, buttonText: "Send" }]] }] }
     ]
 }));
 const SuprSpaceView = makePanelView(() => ({
     columns: [
         { sections: [{ label: "Space", rows: [["decay"], ["predelay"]] }] },
         { sections: [{ label: "Colour", rows: [["tone"], ["lowcut"], ["recovery"]] }] },
-        { sections: [{ label: "Return", rows: [["mix"], ["duck"], ["send"]] }] }
+        { sections: [{ label: "Return", rows: [[{ supr: "dry", marks: "home", centerValue: 0 }],
+            [{ supr: "wet", marks: "home", centerValue: 0 }], ["duck"],
+            [{ supr: "send", compact: true, hideLabel: true, buttonText: "Send" }]] }] }
     ]
 }));
 export class SuprEchoViewFactory implements IControlViewFactory {
@@ -787,7 +793,9 @@ export class SuprSpaceViewFactory implements IControlViewFactory {
 const SuprPhaseView = makePanelView(() => ({
     columns: [
         { sections: [{ label: "Motion", rows: [["rate"], ["depth"], ["centre"]] }] },
-        { sections: [{ label: "Voice", rows: [["feedback"], ["mix"], ["protect"]] }] },
+        { sections: [{ label: "Voice", rows: [["feedback"], [{ supr: "dry", marks: "home", centerValue: 0 }],
+            [{ supr: "wet", marks: "home", centerValue: 0 }],
+            [{ supr: "protect", compact: true, hideLabel: true, buttonText: "Clean lows" }]] }] },
         { sections: [{ label: "Envelope", rows: [["mode"], ["sensitivity"]] }] }
     ]
 }));
@@ -800,15 +808,17 @@ export class SuprPhaseViewFactory implements IControlViewFactory {
 
 
 const SuprVowelView = makePanelView((ctx) => ({
+    headerColumns: 2,
     header: <SuprVowelDisplay key="vowel_display" instanceId={ctx.instanceId}
-        from={ctx.controlValues.vowel_a ?? 0} to={ctx.controlValues.vowel_b ?? 2} />,
+        from={ctx.controlValues.vowel_a ?? 0} to={ctx.controlValues.vowel_b ?? 2} width={276} />,
     columns: [
         { sections: [{ label: "Voice", rows: [["vowel_a"], ["vowel_b"],
             [{ supr: "throat", marks: "home" }], ["focus"]] }] },
         { sections: [{ label: "Motion", rows: [["mode"], ["position"], ["depth"], ["rate"]] }] },
         { sections: [
             { label: "Envelope", rows: [["sensitivity"], ["release"]] },
-            { label: "Output", rows: [["mix"], [{ supr: "level", marks: "home" }]] }
+            { label: "Output", rows: [[{ supr: "dry", marks: "home", centerValue: 0 }], [{ supr: "wet", marks: "home", centerValue: 0 }],
+                [{ supr: "protect", compact: true, hideLabel: true, buttonText: "Clean lows" }]] }
         ] }
     ]
 }));
@@ -816,5 +826,33 @@ export class SuprVowelViewFactory implements IControlViewFactory {
     uri = "https://suprduprnatural.github.io/supr-pedals/vowel";
     Create(model: PiPedalModel, item: PedalboardItem): React.ReactNode {
         return <SuprVowelView instanceId={item.instanceId} item={item} />;
+    }
+}
+
+// Quantization and envelope motion, with independent upper-band levels and clean lows.
+const SuprCrushView = makePanelView(() => ({
+    columns: [
+        { sections: [{ label: "Crush", rows: [
+            [{ supr: "bits", marks: "endpoints" }],
+            [{ supr: "rate", marks: "home" }],
+            [{ supr: "drive", marks: "home" }]
+        ] }] },
+        { sections: [{ label: "Envelope", rows: [
+            [{ supr: "env", marks: "home" }],
+            [{ supr: "sensitivity", marks: "home" }],
+            ["release"]
+        ] }] },
+        { sections: [{ label: "Output", rows: [
+            [{ supr: "tone", marks: "home" }],
+            [{ supr: "dry", marks: "home", centerValue: 0 }],
+            [{ supr: "wet", marks: "home", centerValue: 0 }],
+            [{ supr: "protect", compact: true, hideLabel: true, buttonText: "Clean lows" }]
+        ] }] }
+    ]
+}));
+export class SuprCrushViewFactory implements IControlViewFactory {
+    uri = "https://suprduprnatural.github.io/supr-pedals/crush";
+    Create(model: PiPedalModel, item: PedalboardItem): React.ReactNode {
+        return <SuprCrushView instanceId={item.instanceId} item={item} />;
     }
 }

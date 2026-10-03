@@ -284,7 +284,7 @@ namespace pipedal
         void FirePresetsChanged(int64_t clientId);
         void FirePresetChanged(bool changed);
         void FirePluginPresetsChanged(const std::string &pluginUri);
-        void FirePedalboardChanged(int64_t clientId, bool reloadAudioThread = true);
+        void FirePedalboardChanged(int64_t clientId, bool reloadAudioThread = true, bool refreshHardware = true);
         void FireChannelRouterSettingsChanged(int64_t clientId);
         void FireBanksChanged(int64_t clientId);
         void FireJackConfigurationChanged(const JackConfiguration &jackConfiguration);
@@ -449,7 +449,12 @@ namespace pipedal
         PluginUiPresets GetPluginUiPresets(const std::string &pluginUri);
         PluginPresets GetPluginPresets(const std::string &pluginUri);
 
-        void LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetInstanceId);
+        void LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetInstanceId, bool refreshHardware = true);
+        std::vector<PedalboardItem> LoadPluginPresetWithUndo(int64_t bankId, int64_t presetId,
+            int64_t instanceId, const std::string &uri, uint64_t pluginPresetId);
+        PedalboardItem RestorePluginPresetState(int64_t bankId, int64_t presetId,
+            const PedalboardItem &expected, const PedalboardItem &target);
+        PedalboardItem CapturePluginPresetState(int64_t instanceId);
 
         void AddNotificationSubscription(std::shared_ptr<IPiPedalModelSubscriber> pSubscriber);
         void RemoveNotificationSubsription(std::shared_ptr<IPiPedalModelSubscriber> pSubscriber);

@@ -6,8 +6,8 @@ import { isDarkMode } from './DarkMode';
 const vowels = ['OO', 'OH', 'AH', 'EH', 'EE'];
 type Values = { morph: number; f1: number; f2: number; f3: number };
 
-export default function SuprVowelDisplay({ instanceId, from, to }: {
-    instanceId: number; from: number; to: number;
+export default function SuprVowelDisplay({ instanceId, from, to, width = 348 }: {
+    instanceId: number; from: number; to: number; width?: number;
 }) {
     const model = PiPedalModelFactory.getInstance();
     const [values, setValues] = React.useState<Partial<Values>>({});
@@ -46,7 +46,7 @@ export default function SuprVowelDisplay({ instanceId, from, to }: {
     const position = values.morph === undefined ? undefined : Math.max(0, Math.min(1, values.morph));
     const x = (hz: number) => 18 + 284 * Math.log(Math.max(80, Math.min(6000, hz)) / 80) / Math.log(6000 / 80);
     return (
-        <div data-supr-vowel-display style={{ width: 348, maxWidth: '100%', padding: '0 12px',
+        <div data-supr-vowel-display style={{ width, maxWidth: '100%', padding: '0 12px',
             boxSizing: 'border-box', fontVariantNumeric: 'tabular-nums' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, letterSpacing: '.08em' }}>
                 <span>{name(from)}</span>

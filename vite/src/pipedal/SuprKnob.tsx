@@ -8,6 +8,7 @@
 // Control semantics stay with PiPedal's UiControl. Its valueToRange and
 // rangeToValue methods provide the host's log taper and quantisation, and
 // formatDisplayValue preserves scale-point labels and unit formatting.
+// A centred control uses two linear dB spans around its home position.
 //
 // MIT license, (c) 2026 SuprPedals contributors.
 
@@ -27,6 +28,8 @@ export interface SuprKnobProps {
     markCount?: number;
     /** Diameter of the knob body in px. */
     size?: number;
+    /** Put this value at mid-travel and use it as the home/reset position. */
+    centerValue?: number;
 }
 
 export type SuprKnobMarks = "none" | "endpoints" | "home" | "fill";
@@ -47,26 +50,46 @@ function clampRange(range: number): number {
     return Math.max(0, Math.min(1, range));
 }
 
+function centeredValueToRange(value: number, min: number, max: number, center: number): number {
+    return clampRange(value <= center
+        ? 0.5 * (value - min) / (center - min)
+        : 0.5 + 0.5 * (value - center) / (max - center));
+}
+
+function centeredRangeToValue(range: number, min: number, max: number, center: number): number {
+    const r = clampRange(range);
+    return r <= 0.5 ? min + 2 * r * (center - min)
+        : center + 2 * (r - 0.5) * (max - center);
+}
+
 export default function SuprKnob(props: SuprKnobProps) {
     const {
         instanceId, uiControl, value,
-        marks = "none", markCount = 11, size = 44
+        marks = "none", markCount = 11, size = 44, centerValue
     } = props;
 
     const model: PiPedalModel = PiPedalModelFactory.getInstance();
     const dark = isDarkMode();
+    const knobRef = React.useRef<HTMLDivElement | null>(null);
     const drag = React.useRef<DragState | null>(null);
     const [live, setLive] = React.useState<number | null>(null);
 
-    const normalise = React.useCallback((v: number) => {
-        return uiControl.rangeToValue(uiControl.valueToRange(v));
-    }, [uiControl]);
+    const valueToRange = React.useCallback((v: number) => centerValue === undefined
+        ? uiControl.valueToRange(v)
+        : centeredValueToRange(v, uiControl.min_value, uiControl.max_value, centerValue),
+    [uiControl, centerValue]);
+    const rangeToValue = React.useCallback((r: number) => centerValue === undefined
+        ? uiControl.rangeToValue(r)
+        : centeredRangeToValue(r, uiControl.min_value, uiControl.max_value, centerValue),
+    [uiControl, centerValue]);
+    const normalise = React.useCallback((v: number) => rangeToValue(valueToRange(v)),
+        [rangeToValue, valueToRange]);
 
     const shown = normalise(live !== null ? live : value);
-    const shownRange = uiControl.valueToRange(shown);
+    const shownRange = valueToRange(shown);
 
     const previewRange = (range: number): number => {
-        const next = uiControl.rangeToValue(clampRange(range));
+        const next = rangeToValue(clampRange(range));
         setLive(next);
         model.previewPedalboardValue(instanceId, uiControl.symbol, next);
         return next;
@@ -94,6 +117,7 @@ export default function SuprKnob(props: SuprKnobProps) {
     const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
         if (e.pointerType === "mouse" && e.button !== 0)
             return;
+        e.currentTarget.focus({ preventScroll: true });
         e.currentTarget.setPointerCapture?.(e.pointerId);
         drag.current = {
             pointerId: e.pointerId,
@@ -135,17 +159,27 @@ export default function SuprKnob(props: SuprKnobProps) {
         e.stopPropagation();
     };
 
-    const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const onWheel = (e: WheelEvent) => {
+        if (document.activeElement !== knobRef.current || e.deltaY === 0)
+            return;
         const direction = e.deltaY < 0 ? 1 : -1;
         const fine = e.shiftKey ? 0.1 : 1;
         const range = shownRange + direction * rangeIncrement() * fine;
-        commitValue(uiControl.rangeToValue(clampRange(range)));
+        commitValue(rangeToValue(clampRange(range)));
         e.preventDefault();
         e.stopPropagation();
     };
 
+    // React's wheel listeners are passive. Consume scrolling only while this
+    // knob has deliberate focus, and keep the listener's value current.
+    React.useEffect(() => {
+        const knob = knobRef.current;
+        knob?.addEventListener("wheel", onWheel, { passive: false });
+        return () => knob?.removeEventListener("wheel", onWheel);
+    });
+
     const onDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-        commitValue(uiControl.default_value);
+        commitValue(centerValue ?? uiControl.default_value);
         e.preventDefault();
         e.stopPropagation();
     };
@@ -179,7 +213,7 @@ export default function SuprKnob(props: SuprKnobProps) {
         if (delta !== 0) {
             if (e.shiftKey)
                 delta *= 0.1;
-            commitValue(uiControl.rangeToValue(clampRange(shownRange + delta)));
+            commitValue(rangeToValue(clampRange(shownRange + delta)));
         }
         e.preventDefault();
         e.stopPropagation();
@@ -201,7 +235,7 @@ export default function SuprKnob(props: SuprKnobProps) {
     // dot, especially after clamping at an endpoint. Quantise only the
     // drawing to the nearest dot: the port itself remains fully continuous.
     const litThrough = Math.round(shownRange * (dotCount - 1));
-    const defaultRange = uiControl.valueToRange(uiControl.default_value);
+    const defaultRange = valueToRange(centerValue ?? uiControl.default_value);
     const markRanges = marks === "fill"
         ? Array.from({ length: dotCount }, (_, i) => i / (dotCount - 1))
         : marks === "home"
@@ -232,6 +266,7 @@ export default function SuprKnob(props: SuprKnobProps) {
                 {uiControl.name}
             </div>
             <div
+                ref={knobRef}
                 className="supr-knob-input"
                 role="slider"
                 tabIndex={0}
@@ -244,7 +279,6 @@ export default function SuprKnob(props: SuprKnobProps) {
                 onPointerMove={onPointerMove}
                 onPointerUp={finishPointer}
                 onPointerCancel={finishPointer}
-                onWheel={onWheel}
                 onDoubleClick={onDoubleClick}
                 onKeyDown={onKeyDown}
                 style={{
